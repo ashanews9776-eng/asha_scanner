@@ -1,0 +1,51 @@
+# Open-site fallback domains.
+#
+# When a normal range scan finds zero reachable Cloudflare IPs, these domains
+# are resolved to their Cloudflare edge IPs and probed instead — the idea being
+# that a site which still LOADS through Cloudflare on the user's network points
+# at an edge address the network lets through.
+#
+# Lines starting with '#' are ignored. One host per line. Users can add their
+# own (e.g. a site they know is open right now) from the app's advanced settings.
+
+# --- Cloudflare's own properties (always served from Cloudflare anycast) ---
+cloudflare.com
+www.cloudflare.com
+dash.cloudflare.com
+blog.cloudflare.com
+developers.cloudflare.com
+workers.cloudflare.com
+speed.cloudflare.com
+cp.cloudflare.com
+community.cloudflare.com
+
+# --- Widely-used sites fronted by Cloudflare ---
+discord.com
+www.discord.com
+discordapp.com
+discord.gg
+canva.com
+www.canva.com
+udemy.com
+www.udemy.com
+namecheap.com
+www.namecheap.com
+crunchyroll.com
+www.crunchyroll.com
+nordvpn.com
+www.nordvpn.com
+surfshark.com
+mullvad.net
+4chan.org
+boards.4chan.org
+upwork.com
+www.upwork.com
+patreon.com
+www.patreon.com
+gitbook.com
+riotgames.com
+www.riotgames.com
+mexc.com
+www.mexc.com
+bitmart.com
+zoro.to

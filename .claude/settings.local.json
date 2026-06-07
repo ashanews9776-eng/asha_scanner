@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(mkdir -p app/src/main/res/font)",
+      "Bash(curl -sL -o /tmp/vz-regular.ttf \"https://github.com/rastikerdar/vazirmatn/raw/master/fonts/ttf/Vazirmatn-Regular.ttf\")",
+      "Read(//tmp/**)",
+      "Bash(mkdir -p app/src/main/assets)",
+      "Bash(curl -sL -o app/src/main/assets/cf_ipv4.txt \"https://raw.githubusercontent.com/ircfspace/cf-ip-ranges/main/export.ipv4\")",
+      "Bash(curl -s -o /dev/null -D - \"http://speed.cloudflare.com/__down?bytes=2000\" --max-time 15)",
+      "PowerShell(.\\\\gradlew.bat :app:assembleDebug --console=plain 2>&1 | Select-Object -Last 60)",
+      "PowerShell(.\\\\gradlew.bat compileDebugKotlin --console=plain -q 2>&1 | Select-Object -Last 60)",
+      "PowerShell(.\\\\gradlew.bat --% assembleDebug --console=plain -Pkotlin.compiler.execution.strategy=in-process 2>&1 | Select-String -Pattern \"BUILD SUCCESSFUL\",\"BUILD FAILED\",\"^e: \",\"error:\",\"warning: unused\" | Select-Object -First 40)",
+      "PowerShell(.\\\\gradlew.bat --% assembleDebug --console=plain -Pkotlin.compiler.execution.strategy=in-process 2>&1 | Select-String -Pattern \"BUILD SUCCESSFUL\",\"BUILD FAILED\",\"^e: \",\": error:\",\"Unresolved\",\"incompatible\" | Select-Object -First 50)",
+      "Bash(xargs wc -l)",
+      "Bash(./gradlew :app:assembleDebug -q)",
+      "WebSearch",
+      "Bash(./gradlew :app:assembleRelease -q)",
+      "Bash(./gradlew :app:assembleRelease)",
+      "PowerShell(git config *)",
+      "PowerShell(gh *)"
+    ]
+  }
+}
