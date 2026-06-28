@@ -40,6 +40,7 @@ import com.ahoura.asha_scanner_ip.R
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
 import com.ahoura.asha_scanner_ip.ui.theme.Background
 import com.ahoura.asha_scanner_ip.ui.theme.BlueC
+import com.ahoura.asha_scanner_ip.ui.theme.OrangeC
 import com.ahoura.asha_scanner_ip.ui.theme.RedC
 import com.ahoura.asha_scanner_ip.ui.theme.ShareTechMono
 import com.airbnb.lottie.compose.LottieAnimation
@@ -249,6 +250,119 @@ fun RadarSweep(
 }
 
 private data class BlipSpot(val angle: Float, val radiusFrac: Float)
+
+// ── Latency oscilloscope ──────────────────────────────────────────────────────
+
+/**
+ * CRT-style live latency monitor. Plots the engine's rolling [samples] window
+ * (ms per probe, oldest-first; 0 = a miss/timeout) as a scrolling waveform with
+ * the newest reading pinned to the right edge. Each segment is tinted by its
+ * latency (green good → amber → red), misses fire red dropout spikes, faint
+ * 100/200ms guide lines give the trace meaning, and a sweep shimmer plus a
+ * pulsing leading dot sell the "signal monitor" look. All GPU-cheap Canvas work.
+ */
+@Composable
+fun LatencyOscilloscope(
+    samples: List<Int>,
+    modifier: Modifier = Modifier,
+    capacity: Int = 72,
+    color: Color = Accent,
+    active: Boolean = true,
+) {
+    val transition = rememberInfiniteTransition(label = "scope")
+    val sweep by transition.animateFloat(
+        0f, 1f, infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Restart), label = "sweep",
+    )
+    val pulse by transition.animateFloat(
+        0f, 1f, infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Reverse), label = "pulse",
+    )
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val padT = h * 0.12f
+        val padB = h * 0.14f
+        val usable = h - padT - padB
+        val baseY = h - padB
+
+        // Grid: horizontal divisions + slowly scrolling verticals.
+        val grid = color.copy(alpha = 0.06f)
+        for (i in 0..4) {
+            val y = padT + usable * i / 4f
+            drawLine(grid, Offset(0f, y), Offset(w, y), 1f)
+        }
+        val vStep = w / 12f
+        var gx = -vStep + sweep * vStep
+        while (gx <= w) {
+            drawLine(grid, Offset(gx, padT), Offset(gx, baseY), 1f)
+            gx += vStep
+        }
+
+        // Normalisation ceiling: observed max + headroom, never below 150ms so a
+        // calm run of fast IPs still reads as a low, steady line.
+        val maxV = samples.maxOrNull() ?: 0
+        val ceiling = maxOf(150f, maxV * 1.2f)
+        fun yFor(ms: Float): Float = baseY - (ms / ceiling).coerceIn(0f, 1f) * usable
+
+        // Guide lines + baseline axis.
+        drawLine(Accent.copy(alpha = 0.14f), Offset(0f, yFor(100f)), Offset(w, yFor(100f)), 1f)
+        drawLine(OrangeC.copy(alpha = 0.12f), Offset(0f, yFor(200f)), Offset(w, yFor(200f)), 1f)
+        drawLine(color.copy(alpha = 0.18f), Offset(0f, baseY), Offset(w, baseY), 1f)
+
+        val n = samples.size
+        if (n == 0) return@Canvas
+        val dx = if (capacity > 1) w / (capacity - 1) else w
+        fun xAt(i: Int): Float = w - (n - 1 - i) * dx   // newest pinned to the right
+        fun segColor(ms: Int): Color = when {
+            ms <= 0 -> RedC
+            ms < 100 -> color
+            ms <= 200 -> OrangeC
+            else -> RedC
+        }
+
+        // Miss dropout spikes (behind the trace).
+        samples.forEachIndexed { i, v ->
+            if (v <= 0) {
+                val x = xAt(i)
+                drawLine(RedC.copy(alpha = 0.30f), Offset(x, padT), Offset(x, baseY), 1.5f)
+            }
+        }
+
+        // Trace: soft glow underlay + crisp per-segment line, broken at misses.
+        var prevX = 0f; var prevY = 0f; var havePrev = false
+        var lastX = 0f; var lastY = 0f; var haveLast = false
+        samples.forEachIndexed { i, v ->
+            if (v <= 0) { havePrev = false; return@forEachIndexed }
+            val x = xAt(i); val y = yFor(v.toFloat()); val c = segColor(v)
+            if (havePrev) {
+                drawLine(c.copy(alpha = 0.18f), Offset(prevX, prevY), Offset(x, y), 6f)
+                drawLine(c, Offset(prevX, prevY), Offset(x, y), 2f)
+            }
+            prevX = x; prevY = y; havePrev = true
+            lastX = x; lastY = y; haveLast = true
+        }
+
+        // Moving CRT sweep shimmer.
+        if (active) {
+            val sx = sweep * w
+            val band = w * 0.10f
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    listOf(Color.Transparent, color.copy(alpha = 0.12f), Color.Transparent),
+                    startX = sx - band, endX = sx + band,
+                ),
+                topLeft = Offset((sx - band).coerceAtLeast(0f), padT),
+                size = androidx.compose.ui.geometry.Size((band * 2f).coerceAtMost(w), usable),
+            )
+        }
+
+        // Leading dot: newest reading with crosshair to the edge + pulsing halo.
+        if (haveLast) {
+            drawLine(color.copy(alpha = 0.20f), Offset(lastX, lastY), Offset(w, lastY), 1f)
+            drawCircle(color.copy(alpha = 0.12f + 0.10f * pulse), 10f + 4f * pulse, Offset(lastX, lastY))
+            drawCircle(color, 3f, Offset(lastX, lastY))
+        }
+    }
+}
 
 // ── Neon progress bar ────────────────────────────────────────────────────────
 

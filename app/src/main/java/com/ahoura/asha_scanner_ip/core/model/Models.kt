@@ -151,4 +151,8 @@ data class ScanProgress(
     // True once the engine has switched to the open-site fallback (probing IPs
     // resolved from Cloudflare-fronted domains because the range scan found none).
     val usingFallback: Boolean = false,
+    // Rolling window of the most recent probe latencies (ms) for the live
+    // oscilloscope. A value of 0 marks a miss/timeout (drawn as a dropout spike).
+    // Bounded by the engine, oldest-first, so the UI just plots it left→right.
+    val latencyTrace: List<Int> = emptyList(),
 )

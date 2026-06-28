@@ -56,8 +56,8 @@ import com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn
 import com.ahoura.asha_scanner_ip.ui.theme.displayFamily
 import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 import com.ahoura.asha_scanner_ip.ui.components.ColoBadge
+import com.ahoura.asha_scanner_ip.ui.components.LatencyOscilloscope
 import com.ahoura.asha_scanner_ip.ui.components.NeonProgressBar
-import com.ahoura.asha_scanner_ip.ui.components.RadarSweep
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
 import com.ahoura.asha_scanner_ip.ui.theme.AccentDim
 import com.ahoura.asha_scanner_ip.ui.theme.BlueC
@@ -170,24 +170,44 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
             }
         }
 
-        // ---- Radar hero (probe / resolve phases) ----
+        // ---- Live latency oscilloscope hero (probe / resolve phases) ----
         if (p.phase == ScanPhase.PROBING || resolving) {
             Spacer8()
-            Box(Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
-                RadarSweep(
-                    modifier = Modifier.size(150.dp),
-                    color = if (resolving) OrangeC else Accent,
-                    blips = p.found,
+            val scopeColor = if (resolving) OrangeC else Accent
+            val curMs = p.latencyTrace.lastOrNull { it > 0 } ?: 0
+            Box(
+                Modifier.fillMaxWidth().height(132.dp).clip(RoundedCornerShape(6.dp))
+                    .background(SurfaceC).border(0.5.dp, BorderC, RoundedCornerShape(6.dp)),
+            ) {
+                LatencyOscilloscope(
+                    samples = p.latencyTrace,
+                    modifier = Modifier.fillMaxSize(),
+                    color = scopeColor,
                     active = true,
                 )
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("${p.found}".localizeDigits(lang), color = Accent, fontFamily = ShareTechMono, fontSize = 26.sp)
+                // Corner readouts overlaid on the scope.
+                Row(
+                    Modifier.fillMaxWidth().align(Alignment.TopCenter)
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
                     Text(
-                        if (fa) s.healthy else s.healthy.uppercase(),
-                        color = TextMutedC, fontFamily = if (fa) Vazirmatn else ShareTechMono,
-                        fontSize = if (fa) 9.sp else 8.sp, letterSpacing = if (fa) 0.sp else 2.sp,
+                        if (fa) s.liveLatency else s.liveLatency.uppercase(),
+                        color = scopeColor, fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                        fontSize = if (fa) 10.sp else 9.sp, letterSpacing = if (fa) 0.sp else 1.5.sp,
+                    )
+                    Text(
+                        if (curMs > 0) "${curMs}".localizeDigits(lang) + " ms" else "— ms",
+                        color = latencyColor(curMs), fontFamily = ShareTechMono, fontSize = 13.sp,
                     )
                 }
+                // Healthy count anchored bottom-start so the radar's headline stat survives.
+                Text(
+                    "▲ ${"${p.found}".localizeDigits(lang)} ${if (fa) s.healthy else s.healthy.uppercase()}",
+                    color = AccentDim, fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                    fontSize = if (fa) 9.sp else 8.sp, letterSpacing = if (fa) 0.sp else 1.sp,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = 10.dp, vertical = 6.dp),
+                )
             }
         }
 

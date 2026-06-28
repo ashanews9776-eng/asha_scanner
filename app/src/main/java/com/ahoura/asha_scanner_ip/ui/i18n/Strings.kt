@@ -57,6 +57,7 @@ data class AppStrings(
     val phaseEdgesMeasured: String,
     val phaseDnsLookup: String,
     val phaseFallbackEdges: String,
+    val liveLatency: String,
     val copyIp: String,
     // Results
     val results: String,
@@ -132,6 +133,7 @@ private val EN = AppStrings(
     phaseEdgesMeasured = "EDGES MEASURED",
     phaseDnsLookup = "FALLBACK · DNS LOOKUP OF OPEN CF SITES",
     phaseFallbackEdges = "FALLBACK · PROBING OPEN CF SITE EDGES",
+    liveLatency = "LIVE LATENCY",
     copyIp = "COPY IP",
     results = "Results",
     healthyIpsTopShown = "HEALTHY IPs · TOP %d SHOWN",
@@ -205,6 +207,7 @@ private val FA = AppStrings(
     phaseEdgesMeasured = "آی‌پی اندازه‌گیری‌شده",
     phaseDnsLookup = "جایگزین · جست‌وجوی DNS سایت‌های باز کلودفلر",
     phaseFallbackEdges = "جایگزین · بررسی آی‌پی سایت‌های باز کلودفلر",
+    liveLatency = "تأخیر زنده",
     copyIp = "کپی آی‌پی",
     results = "نتایج",
     healthyIpsTopShown = "آی‌پی سالم · نمایش %d مورد برتر",

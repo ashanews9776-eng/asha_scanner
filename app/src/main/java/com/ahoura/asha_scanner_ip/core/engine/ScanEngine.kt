@@ -81,10 +81,13 @@ class ScanEngine(
         val healthy = Collections.synchronizedList(ArrayList<ScanResult>())
         val foundCount = AtomicInteger(0)
         val prober = Prober(cfg)
+        // Shared rolling latency trace feeding the live oscilloscope. Continuous
+        // across the primary and fallback passes so the waveform doesn't reset.
+        val latencyTrace = Collections.synchronizedList(ArrayList<Int>())
 
         // ---- Phase 1: probe the primary candidates -------------------------
         var grandTotal = primaryTotal
-        runProbePhase(primaryTasks, primaryTotal, probeDispatcher, prober, cfg, healthy, foundCount, ::elapsed, usingFallback = false)
+        runProbePhase(primaryTasks, primaryTotal, probeDispatcher, prober, cfg, healthy, foundCount, latencyTrace, ::elapsed, usingFallback = false)
 
         // ---- Phase 1b: open-site fallback ----------------------------------
         // Nothing healthy from the range scan? Resolve known Cloudflare-fronted
@@ -92,7 +95,7 @@ class ScanEngine(
         // demonstrably letting through for sites that still load.
         var usingFallback = false
         if (healthy.isEmpty() && cfg.fallbackToDomains && cfg.fallbackDomains.isNotEmpty()) {
-            send(ScanProgress(phase = ScanPhase.RESOLVING, elapsedMs = elapsed(), usingFallback = true))
+            send(ScanProgress(phase = ScanPhase.RESOLVING, elapsedMs = elapsed(), usingFallback = true, latencyTrace = snapshotTrace(latencyTrace)))
             val fbHosts = runCatching {
                 DomainResolver.resolveHosts(
                     domains = cfg.fallbackDomains,
@@ -107,7 +110,7 @@ class ScanEngine(
                 val fbTasks = ArrayList<ProbeTask>(fbHosts.size * ports.size)
                 for (h in fbHosts) for (port in ports) fbTasks.add(ProbeTask(h.ip, port, h.domain))
                 grandTotal += fbTasks.size
-                runProbePhase(fbTasks.iterator(), fbTasks.size, probeDispatcher, prober, cfg, healthy, foundCount, ::elapsed, usingFallback = true)
+                runProbePhase(fbTasks.iterator(), fbTasks.size, probeDispatcher, prober, cfg, healthy, foundCount, latencyTrace, ::elapsed, usingFallback = true)
             }
         }
 
@@ -186,6 +189,11 @@ class ScanEngine(
         )
     }
 
+    private companion object {
+        /** Max samples kept in the live oscilloscope window. */
+        const val TRACE_CAP = 72
+    }
+
     /** One probe unit: an endpoint plus an optional SNI to pin (null = rotate). */
     private data class ProbeTask(val ip: String, val port: Int, val sni: String? = null)
 
@@ -195,6 +203,23 @@ class ScanEngine(
 
     private fun snapshotBest(healthy: List<ScanResult>, top: Int): List<ScanResult> =
         synchronized(healthy) { ResultSort.topByLatency(ArrayList(healthy), top) }
+
+    /** Defensive copy of the rolling latency trace for a progress snapshot. */
+    private fun snapshotTrace(trace: List<Int>): List<Int> =
+        synchronized(trace) { ArrayList(trace) }
+
+    /**
+     * Push one probe's latency onto the bounded oscilloscope trace. Responding
+     * probes contribute their average latency (ms, floored at 1); a miss/timeout
+     * is recorded as 0 so the UI can draw it as a dropout spike.
+     */
+    private fun recordSample(trace: MutableList<Int>, r: ScanResult) {
+        val v = if (r.latenciesMs.isNotEmpty()) r.avgLatencyMs.toInt().coerceAtLeast(1) else 0
+        synchronized(trace) {
+            trace.add(v)
+            while (trace.size > TRACE_CAP) trace.removeAt(0)
+        }
+    }
 
     /**
      * Run one Phase-1 probing pass over [tasks], appending healthy hits to the
@@ -210,6 +235,7 @@ class ScanEngine(
         cfg: ScanConfig,
         healthy: MutableList<ScanResult>,
         foundCount: AtomicInteger,
+        latencyTrace: MutableList<Int>,
         elapsed: () -> Long,
         usingFallback: Boolean,
     ) {
@@ -227,6 +253,7 @@ class ScanEngine(
                 phase = ScanPhase.PROBING, total = total,
                 found = foundCount.get(), elapsedMs = elapsed(),
                 best = snapshotBest(healthy, cfg.top), usingFallback = usingFallback,
+                latencyTrace = snapshotTrace(latencyTrace),
             )
         )
 
@@ -241,6 +268,7 @@ class ScanEngine(
                         } ?: break
                         val r = prober.probe(task.ip, task.port, task.sni)
                         val t = tested.incrementAndGet()
+                        recordSample(latencyTrace, r)
                         if (r.healthy) {
                             healthy.add(r)
                             val f = foundCount.incrementAndGet()
@@ -261,6 +289,7 @@ class ScanEngine(
                                         elapsedMs = elapsed(),
                                         best = snapshotBest(healthy, cfg.top),
                                         usingFallback = usingFallback,
+                                        latencyTrace = snapshotTrace(latencyTrace),
                                     )
                                 )
                             }
