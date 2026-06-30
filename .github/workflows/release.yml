@@ -3,11 +3,11 @@ name: Release APK
 on:
   push:
     tags:
-      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag name for the release (e.g. v0.3)'
+        description: 'Tag name for the release'
         required: true
         default: 'v0.3-manual'
 
@@ -31,30 +31,30 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
+      - name: Decode Keystore
+        env:
+          ENCODED_STRING: ${{ secrets.SIGNING_KEY }}
+        run: |
+          if [ -n "$ENCODED_STRING" ]; then
+            echo "$ENCODED_STRING" | base64 --decode > app/release-key-ci.jks
+          fi
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease
-
-      - name: Sign APK
-        uses: r0adkll/sign-android-release@v1
-        id: sign_app
-        with:
-          releaseDirectory: app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
         env:
-          BUILD_TOOLS_VERSION: "35.0.0"
+          KEYSTORE_PATH: "release-key-ci.jks"
+          KEYSTORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
 
       - name: Create Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          files: |
-            ${{ steps.sign_app.outputs.signedReleaseFile }}
+          files: app/build/outputs/apk/release/*.apk
           draft: false
           prerelease: false
           generate_release_notes: true

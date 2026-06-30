@@ -27,14 +27,22 @@ android {
         create("release") {
             val properties = Properties()
             val propertiesFile = rootProject.file("local.properties")
-            val keyFile = file("release-key.jks")
-            
-            if (propertiesFile.exists() && keyFile.exists()) {
+            if (propertiesFile.exists()) {
                 properties.load(propertiesFile.inputStream())
+            }
+
+            // Priority: Env variables (for CI) > local.properties (for Local)
+            val keystorePath = System.getenv("KEYSTORE_PATH") ?: "release-key.jks"
+            val keystorePassword = System.getenv("KEYSTORE_PASSWORD") ?: properties.getProperty("keystore.password")
+            val alias = System.getenv("KEY_ALIAS") ?: properties.getProperty("key.alias")
+            val kPassword = System.getenv("KEY_PASSWORD") ?: properties.getProperty("key.password")
+
+            val keyFile = file(keystorePath)
+            if (keyFile.exists() && keystorePassword != null && alias != null && kPassword != null) {
                 storeFile = keyFile
-                storePassword = properties.getProperty("keystore.password")
-                keyAlias = properties.getProperty("key.alias")
-                keyPassword = properties.getProperty("key.password")
+                storePassword = keystorePassword
+                keyAlias = alias
+                keyPassword = kPassword
             }
         }
     }
