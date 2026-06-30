@@ -27,14 +27,15 @@ android {
         create("release") {
             val properties = Properties()
             val propertiesFile = rootProject.file("local.properties")
-            if (propertiesFile.exists()) {
+            val keyFile = file("release-key.jks")
+            
+            if (propertiesFile.exists() && keyFile.exists()) {
                 properties.load(propertiesFile.inputStream())
+                storeFile = keyFile
+                storePassword = properties.getProperty("keystore.password")
+                keyAlias = properties.getProperty("key.alias")
+                keyPassword = properties.getProperty("key.password")
             }
-
-            storeFile = file("release-key.jks")
-            storePassword = properties.getProperty("keystore.password")
-            keyAlias = properties.getProperty("key.alias")
-            keyPassword = properties.getProperty("key.password")
         }
     }
 
