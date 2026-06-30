@@ -41,7 +41,10 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            val releaseSigningConfig = signingConfigs.getByName("release")
+            if (releaseSigningConfig.storeFile != null) {
+                signingConfig = releaseSigningConfig
+            }
             // R8 full mode: shrink + obfuscate + optimize code, and strip unused
             // resources (was disabled, inflating the APK and skipping runtime opts).
             isMinifyEnabled = true
