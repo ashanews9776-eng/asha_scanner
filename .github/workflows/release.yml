@@ -50,11 +50,15 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease
 
+      - name: Rename APK
+        run: |
+          mv app/build/outputs/apk/release/*.apk app/build/outputs/apk/release/asha_scanner.apk
+
       - name: Create Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          files: app/build/outputs/apk/release/*.apk
+          files: app/build/outputs/apk/release/asha_scanner.apk
           draft: false
           prerelease: false
           generate_release_notes: true
