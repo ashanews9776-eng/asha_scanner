@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.unit.LayoutDirection
 import com.ahoura.asha_scanner_ip.ui.components.CyberBackground
+import com.ahoura.asha_scanner_ip.ui.components.UpdateDialog
 import com.ahoura.asha_scanner_ip.ui.i18n.Lang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
@@ -51,6 +52,7 @@ fun AshaApp(vm: ScanViewModel) {
     fun home() { stack.clear(); stack.add(Route.HOME) }
 
     val lang by vm.language.collectAsState()
+    val state by vm.state.collectAsState()
     val direction = if (lang == Lang.FA) LayoutDirection.Rtl else LayoutDirection.Ltr
 
     // Keep the living backdrop in motion only where it earns its keep — the Home
@@ -111,6 +113,15 @@ fun AshaApp(vm: ScanViewModel) {
                             )
                             Route.ABOUT -> AboutScreen(onBack = ::back)
                         }
+                    }
+
+                    // Show update dialog if available
+                    state.updateInfo?.let { info ->
+                        UpdateDialog(
+                            version = info.version,
+                            url = info.url,
+                            onDismiss = { vm.dismissUpdate() }
+                        )
                     }
                 }
             }

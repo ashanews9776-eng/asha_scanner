@@ -22,6 +22,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+data class UpdateInfo(
+    val version: String,
+    val url: String,
+)
+
 data class UiState(
     val configText: String = "",
     val parsedProxy: ProxyConfig? = null,
@@ -33,6 +38,7 @@ data class UiState(
     val customRangesText: String = "",
     val testIpsText: String = "",
     val fallbackDomainsText: String = "",
+    val updateInfo: UpdateInfo? = null,
 )
 
 class ScanViewModel(app: Application) : AndroidViewModel(app) {
@@ -67,7 +73,40 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 )
             }
+            checkUpdate()
         }
+    }
+
+    private fun checkUpdate() {
+        try {
+            val url = java.net.URL("https://api.github.com/repos/ashanews9776-eng/asha_scanner/releases/latest")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+
+            if (conn.responseCode == 200) {
+                val response = conn.inputStream.bufferedReader().readText()
+                // Crude but effective JSON extraction for tag_name and html_url
+                val tagName = "\"tag_name\"\\s*:\\s*\"([^\"]+)\"".toRegex().find(response)?.groupValues?.get(1)
+                val htmlUrl = "\"html_url\"\\s*:\\s*\"([^\"]+)\"".toRegex().find(response)?.groupValues?.get(1)
+
+                val app = getApplication<Application>()
+                val packageInfo = app.packageManager.getPackageInfo(app.packageName, 0)
+                val currentVersion = "v${packageInfo.versionName}"
+
+                if (tagName != null && htmlUrl != null && tagName != currentVersion) {
+                    _state.update { it.copy(updateInfo = UpdateInfo(tagName, htmlUrl)) }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun dismissUpdate() {
+        _state.update { it.copy(updateInfo = null) }
     }
 
     private fun readAssetLines(name: String): List<String> = runCatching {
