@@ -56,7 +56,7 @@ import com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn
 import com.ahoura.asha_scanner_ip.ui.theme.displayFamily
 import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 import com.ahoura.asha_scanner_ip.ui.components.ColoBadge
-import com.ahoura.asha_scanner_ip.ui.components.LatencyOscilloscope
+import com.ahoura.asha_scanner_ip.ui.components.RadarSweep
 import com.ahoura.asha_scanner_ip.ui.components.NeonProgressBar
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
 import com.ahoura.asha_scanner_ip.ui.theme.AccentDim
@@ -170,7 +170,7 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
             }
         }
 
-        // ---- Live latency oscilloscope hero (probe / resolve phases) ----
+        // ---- Live radar sweep hero (probe / resolve phases) ----
         if (p.phase == ScanPhase.PROBING || resolving) {
             Spacer8()
             val scopeColor = if (resolving) OrangeC else Accent
@@ -179,10 +179,10 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
                 Modifier.fillMaxWidth().height(132.dp).clip(RoundedCornerShape(6.dp))
                     .background(SurfaceC).border(0.5.dp, BorderC, RoundedCornerShape(6.dp)),
             ) {
-                LatencyOscilloscope(
-                    samples = p.latencyTrace,
+                RadarSweep(
                     modifier = Modifier.fillMaxSize(),
                     color = scopeColor,
+                    blips = p.found,
                     active = true,
                 )
                 // Corner readouts overlaid on the scope.
@@ -192,7 +192,7 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        if (fa) s.liveLatency else s.liveLatency.uppercase(),
+                        if (fa) s.radar else s.radar.uppercase(),
                         color = scopeColor, fontFamily = if (fa) Vazirmatn else ShareTechMono,
                         fontSize = if (fa) 10.sp else 9.sp, letterSpacing = if (fa) 0.sp else 1.5.sp,
                     )
@@ -201,7 +201,7 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
                         color = latencyColor(curMs), fontFamily = ShareTechMono, fontSize = 13.sp,
                     )
                 }
-                // Healthy count anchored bottom-start so the radar's headline stat survives.
+                // Healthy count anchored bottom-start.
                 Text(
                     "▲ ${"${p.found}".localizeDigits(lang)} ${if (fa) s.healthy else s.healthy.uppercase()}",
                     color = AccentDim, fontFamily = if (fa) Vazirmatn else ShareTechMono,
