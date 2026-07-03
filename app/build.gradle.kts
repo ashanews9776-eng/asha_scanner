@@ -7,18 +7,14 @@ plugins {
 
 android {
     namespace = "com.ahoura.asha_scanner_ip"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.ahoura.asha_scanner_ip"
         minSdk = 24
-        targetSdk = 36
-        versionCode = 4
-        versionName = "0.5.2"
+        targetSdk = 37
+        versionCode = 5
+        versionName = "0.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
