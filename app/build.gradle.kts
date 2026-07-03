@@ -17,8 +17,8 @@ android {
         applicationId = "com.ahoura.asha_scanner_ip"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.4"
+        versionCode = 3
+        versionName = "0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
