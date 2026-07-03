@@ -1,78 +1,70 @@
-# Asha Scanner · اسکنر آشا
+# 🛡️ Asha Scanner (ASHA-IP)
+**High-Performance Native Cloudflare IP Scanner for Android**
 
-An Android port of [SenPaiScanner](https://github.com/MatinSenPai/SenPaiScanner) — a
-**clean Cloudflare IP scanner** for VLESS / Trojan proxies, rebuilt natively in Kotlin +
-Jetpack Compose, **Persian-first (RTL) with an English toggle**, designed for the Iranian
-community on unreliable networks.
+[![Release](https://img.shields.io/github/v/release/ashanews9776-eng/asha_scanner?style=for-the-badge&color=cyan)](https://github.com/ashanews9776-eng/asha_scanner/releases)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-blue?style=for-the-badge&logo=kotlin)](https://kotlinlang.org)
+[![UI](https://img.shields.io/badge/UI-Jetpack_Compose-green?style=for-the-badge&logo=jetpackcompose)](https://developer.android.com/compose)
 
-You paste a `vless://` or `trojan://` link, the app finds the fastest, cleanest Cloudflare
-edge IPs, and you copy the winners into your existing client (v2rayNG, NekoBox, …).
+Asha Scanner is a powerful, native Android utility designed to find the fastest and most reliable Cloudflare "Clean" IPs. Specially optimized for users in restricted networks, it helps you discover low-latency edges for your VLESS, Trojan, and other proxy configurations.
 
-## How it works (faithful to the original two phases)
+---
 
-**Phase 1 — Probe.** Generates random IPs from Cloudflare's published CIDR ranges (bundled
-offline) and tests each with an escalating handshake — `TCP → TLS (with SNI rotation to
-dodge DPI) → HTTPS GET /cdn-cgi/trace` — splitting the timeout budget across dial / TLS /
-request and measuring latency, jitter and packet loss. Mirrors `internal/prober`.
+## ✨ Key Features
+*   **Multiple Scan Modes:** 
+    *   **Quick Scan:** Instantly test random Cloudflare IP ranges.
+    *   **Custom Scan:** Fine-tune count, workers, timeout, and specific CIDRs.
+    *   **Test List:** Import your own list of IPs via file or paste to validate.
+    *   **PoP Discovery:** Discover which Cloudflare Data Centers (Colos) are reachable from your network.
+*   **Cyberpunk Terminal UI:** A unique, retro-futuristic interface with real-time radar sweep and signal monitoring.
+*   **Real Speed Testing:** Measures actual download throughput through your provided proxy configurations.
+*   **Smart Fallback:** Automatically resolves open Cloudflare-fronted sites if standard ranges are blocked.
+*   **Auto-Update:** Built-in checker to notify you of new versions on GitHub.
+*   **Bi-lingual:** Full support for English and Persian (Farsi) languages.
 
-**Phase 2 — Validate.** Ranks the survivors by latency and measures the **real download
-throughput** of the best ones, then re-ranks by speed. Two strategies, chosen automatically:
+## 🚀 Installation
+1. Go to the [Releases](https://github.com/ashanews9776-eng/asha_scanner/releases) page.
+2. Download the latest `asha_scanner.apk`.
+3. Install on your Android device (Android 7.0+ recommended).
 
-- **Tunnel-through-config** (when you paste a `vless://`/`trojan://` link, `TunnelValidator`):
-  a pure-Kotlin VLESS/Trojan client dials each candidate edge, completes the outer TLS
-  handshake with your config's SNI over a plain-TCP or WebSocket transport, speaks the real
-  proxy handshake to your origin, and pulls `speed.cloudflare.com/__down` *through the actual
-  tunnel*. So latency + speed reflect the genuine end-to-end path a v2rayNG/NekoBox client
-  would get on that IP. Transports it can't speak natively (Reality, gRPC, xhttp) fall back
-  gracefully.
-- **Direct edge** (no config, e.g. Test-IPs mode, `DirectThroughputValidator`): pulls the
-  same speed endpoint straight through each candidate IP — the technique CloudflareSpeedTest
-  uses.
+---
 
-Both are pure-Kotlin with no native dependencies. The byte-exact proxy framing lives in
-`ProxyHandshake` (unit-tested against known vectors).
+# 🛡️ اسکنر آشا (Asha Scanner)
+**اسکنر بومی و پرقدرت آی‌پی‌های تمیز کلودفلر برای اندروید**
 
-## Architecture
+اسکنر آشا یک ابزار حرفه‌ای برای سیستم‌عامل اندروید است که جهت یافتن سریع‌ترین و پایدارترین آی‌پی‌های "تمیز" کلودفلر طراحی شده است. این اپلیکیشن با بهینه‌سازی ویژه برای شبکه‌های دارای محدودیت، به شما کمک می‌کند تا بهترین لبه‌های کلودفلر را برای کانفیگ‌های VLESS، Trojan و سایر پروتکل‌ها پیدا کنید.
 
-```
-core/
-  model/      Models.kt            data classes, enums (ProbeMode, Protocol, ScanResult…)
-  ipsrc/      CloudflareRanges.kt  official CF v4/v6 CIDRs (fallback) + IPv6 source
-              IpSource.kt          random IP generation (port of internal/ipsrc)
-              (assets/cf_ipv4.txt) precise ~4.6k curated /24 ranges (ircfspace list),
-                                   loaded at startup as the primary IPv4 source
-  parser/     ProxyParser.kt       vless:// & trojan:// parser (port of xraytest/parser.go)
-  net/        Tls.kt               dial a specific IP with chosen SNI/ALPN
-  prober/     Prober.kt            Phase-1 TCP/TLS/HTTP probing (port of internal/prober)
-  validator/  Validator.kt         strategy interface
-              TunnelValidator.kt             pure-Kotlin VLESS/Trojan tunnel Phase-2
-              ProxyHandshake.kt              byte-exact VLESS/Trojan/WS framing (tested)
-              DirectThroughputValidator.kt   direct-edge Phase-2 (no config)
-              XrayConfigBuilder.kt           full port of xraytest/builder.go
-              XrayValidator.kt               drop-in slot for xray-core
-  engine/     ScanEngine.kt        orchestration -> Flow<ScanProgress>
-              ResultSort.kt        ranking (port of result.go comparators)
-  output/     Exporter.kt          clipboard / share formatting
-ui/           Compose screens, theme (Vazirmatn), FA/EN i18n, ViewModel
-```
+---
 
-## Optional: full xray-core Phase 2 (true end-to-end speed)
+## ✨ قابلیت‌های کلیدی
+*   **حالت‌های متنوع اسکن:**
+    *   **اسکن سریع:** تست آنی آی‌پی‌های تصادفی از رنج‌های کلودفلر.
+    *   **اسکن سفارشی:** تنظیم دقیق تعداد، رشته‌ها (Workers)، مهلت زمانی و بلوک‌های آی‌پی (CIDR).
+    *   **تست لیست:** وارد کردن لیست شخصی آی‌پی‌ها از فایل یا متن برای بررسی پایداری.
+    *   **کشف دیتاسنتر:** شناسایی دیتاسنترهای (Colo) در دسترس شبکه شما.
+*   **رابط کاربری سایبرپانک:** طراحی منحصربه‌فرد و مدرن با انیمیشن رادار و مانیتورینگ لحظه‌ای سیگنال.
+*   **تست سرعت واقعی:** اندازه‌گیری سرعت دانلود واقعی از طریق کانفیگ‌های پروکسی شما.
+*   **سیستم جایگزین هوشمند:** قابلیت استخراج آی‌پی از سایت‌های پشت کلودفلر در صورت مسدود بودن رنج‌ها.
+*   **بروزرسانی خودکار:** سیستم داخلی برای اطلاع‌رسانی و دریافت نسخه‌های جدید از گیت‌هاب.
+*   **دو زبانه:** پشتیبانی کامل از زبان‌های فارسی و انگلیسی.
 
-`TunnelValidator` already measures speed *through* the proxy for VLESS/Trojan over TCP/WS.
-If you want byte-for-byte parity with the desktop tool for **every** transport (including
-Reality / gRPC / xhttp), the xray-core integration point is already built:
+## 🚀 نصب و راه‌اندازی
+۱. به صفحه [Releases](https://github.com/ashanews9776-eng/asha_scanner/releases) بروید.
+۲. آخرین نسخه فایل `asha_scanner.apk` را دانلود کنید.
+۳. روی دستگاه اندرویدی خود نصب کنید (اندروید ۷ به بالا پیشنهاد می‌شود).
 
-1. Add an xray-core mobile AAR (e.g. AndroidLibXrayLite / libv2ray) to `app/libs`.
-2. Implement the start/stop glue in `XrayValidator` — `XrayConfigBuilder` already emits the
-   exact JSON xray-core expects, with the candidate IP swapped into the outbound.
-3. Construct `ScanEngine(XrayValidator())`. Nothing else changes.
+---
 
-## Build
+## 🛠 Technical Details / جزئیات فنی
+*   **Language:** Kotlin
+*   **UI Framework:** Jetpack Compose
+*   **Animations:** Canvas API & Lottie
+*   **Architecture:** MVVM (Model-View-ViewModel)
+*   **CI/CD:** Automated builds and releases via GitHub Actions
 
-```
-./gradlew :app:assembleDebug      # APK -> app/build/outputs/apk/debug/
-./gradlew :app:testDebugUnitTest  # core logic tests
-```
+---
+### 📢 Telegram Channel / کانال تلگرام
+Join our community for updates and support:
+[**@asha_news2**](https://t.me/asha_news2)
 
-Min SDK 24 · Target SDK 36 · Kotlin 2.2 · Compose. Vazirmatn is bundled for offline
-Persian/Latin rendering.
+---
+*Developed with ❤️ for the freedom of information.*
