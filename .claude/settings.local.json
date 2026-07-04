@@ -19,7 +19,13 @@
       "Bash(./gradlew :app:assembleRelease -q)",
       "Bash(./gradlew :app:assembleRelease)",
       "PowerShell(git config *)",
-      "PowerShell(gh *)"
+      "PowerShell(gh *)",
+      "Bash(./gradlew :app:compileDebugKotlin -q)",
+      "Bash(./gradlew :app:compileDebugKotlin)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git remote *)",
+      "Bash(git push *)"
     ]
   }
 }

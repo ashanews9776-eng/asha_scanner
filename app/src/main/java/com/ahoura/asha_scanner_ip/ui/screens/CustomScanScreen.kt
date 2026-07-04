@@ -28,7 +28,6 @@ import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
 import com.ahoura.asha_scanner_ip.ui.theme.AccentDim
 import com.ahoura.asha_scanner_ip.ui.theme.RedC
-import com.ahoura.asha_scanner_ip.ui.theme.ShareTechMono
 import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 
 @Composable
@@ -45,6 +44,16 @@ fun CustomScanScreen(vm: ScanViewModel, onBack: () -> Unit, onStart: () -> Unit)
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ScanSettings(vm = vm, cfg = cfg, showAdvancedDefault = true)
+
+            Spacer(Modifier.size(14.dp))
+            SectionLabel(s.pasteIps + " (${s.configOptional})")
+            Spacer(Modifier.size(6.dp))
+            KvInput(
+                label = "ips",
+                value = state.testIpsText,
+                onValueChange = vm::onTestIpsChange,
+                placeholder = "1.1.1.1, 8.8.8.8 ...",
+            )
 
             Spacer(Modifier.size(14.dp))
             SectionLabel(s.configOptional)

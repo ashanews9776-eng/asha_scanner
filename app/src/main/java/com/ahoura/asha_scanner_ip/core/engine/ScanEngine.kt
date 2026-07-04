@@ -246,7 +246,9 @@ class ScanEngine(
 
         // Smart-stop target: once we have comfortably more than we need, there's
         // no point probing thousands more IPs. Scales with the user's "keep best".
+        // Skip smart-stop if we are scanning a fixed list of IPs (Test mode).
         val earlyTarget = maxOf(cfg.top * 4, 30)
+        val canStopEarly = cfg.smartStop && cfg.explicitIps.isEmpty()
 
         send(
             ScanProgress(
@@ -272,7 +274,7 @@ class ScanEngine(
                         if (r.healthy) {
                             healthy.add(r)
                             val f = foundCount.incrementAndGet()
-                            if (cfg.smartStop && f >= earlyTarget) stopEarly.set(true)
+                            if (canStopEarly && f >= earlyTarget) stopEarly.set(true)
                         }
                         // Throttle UI emissions to ~10/sec to keep recomposition cheap,
                         // but always emit the final probe and stop-triggering events.

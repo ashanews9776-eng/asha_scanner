@@ -2,7 +2,11 @@ package com.ahoura.asha_scanner_ip.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FileOpen
@@ -22,6 +27,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -82,19 +89,39 @@ fun TestIpsScreen(vm: ScanViewModel, onBack: () -> Unit, onStart: () -> Unit) {
             GhostFileButton(s.loadFile, icon = Icons.Filled.FileOpen) { picker.launch("text/*") }
 
             Spacer(Modifier.size(4.dp))
+            SectionLabel(s.mode)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                ProbeMode.entries.forEach { mode ->
+                    val sel = state.scanConfig.mode == mode
+                    Box(
+                        Modifier.clip(RoundedCornerShape(4.dp))
+                            .background(if (sel) Accent.copy(alpha = 0.1f) else Color.Transparent)
+                            .border(0.5.dp, if (sel) Accent else TextMutedC.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                            .clickable { vm.updateScanConfig { it.copy(mode = mode) } }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(mode.wire.uppercase(), color = if (sel) Accent else TextMutedC, fontFamily = ShareTechMono, fontSize = 11.sp)
+                    }
+                }
+            }
+
+            Spacer(Modifier.size(4.dp))
             SectionLabel(s.fixedSettings)
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                InfoChip("HTTP"); InfoChip("443"); InfoChip("6 TRIES")
+                InfoChip(state.scanConfig.mode.wire.uppercase()); InfoChip("443"); InfoChip("6 TRIES")
                 InfoChip("10s"); InfoChip("20 WORKERS"); InfoChip("speed.cloudflare.com")
             }
         }
         Column(Modifier.padding(12.dp)) {
             ScanButton(text = "▶  ${s.startTest}", icon = Icons.Filled.PlayArrow, enabled = count > 0) {
                 vm.updateScanConfig {
-                    it.copy(mode = ProbeMode.HTTP, ports = listOf(443), tries = 6, timeoutMs = 10_000, concurrency = 20, speedTest = true, top = 50)
+                    it.copy(ports = listOf(443), tries = 6, timeoutMs = 10_000, concurrency = 20, speedTest = true, top = 50, smartStop = false)
                 }
                 onStart()
             }

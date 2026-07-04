@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -34,6 +37,8 @@ import com.ahoura.asha_scanner_ip.ui.theme.BorderC
 import com.ahoura.asha_scanner_ip.ui.theme.SurfaceC
 import com.ahoura.asha_scanner_ip.ui.theme.TextMutedC
 import com.ahoura.asha_scanner_ip.ui.theme.TextPrimaryC
+import com.ahoura.asha_scanner_ip.ui.theme.TextSecondaryC
+import com.ahoura.asha_scanner_ip.ui.theme.ShareTechMono
 import com.ahoura.asha_scanner_ip.ui.theme.displayFamily
 import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 
@@ -41,6 +46,7 @@ import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 fun UpdateDialog(
     version: String,
     url: String,
+    changelog: String? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -74,6 +80,28 @@ fun UpdateDialog(
                     fontSize = 13.sp,
                     lineHeight = 20.sp
                 )
+
+                if (!changelog.isNullOrBlank()) {
+                    Box(Modifier.size(16.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color.Black.copy(alpha = 0.2f))
+                            .padding(8.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            text = changelog,
+                            color = TextSecondaryC,
+                            fontFamily = ShareTechMono,
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+
                 Box(Modifier.size(24.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),

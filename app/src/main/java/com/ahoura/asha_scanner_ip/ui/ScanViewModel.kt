@@ -9,6 +9,7 @@ import com.ahoura.asha_scanner_ip.core.model.ProxyConfig
 import com.ahoura.asha_scanner_ip.core.model.ScanConfig
 import com.ahoura.asha_scanner_ip.core.model.ScanPhase
 import com.ahoura.asha_scanner_ip.core.model.ScanProgress
+import com.ahoura.asha_scanner_ip.core.net.SubServer
 import com.ahoura.asha_scanner_ip.core.parser.ProxyParser
 import com.ahoura.asha_scanner_ip.data.SettingsStore
 import com.ahoura.asha_scanner_ip.ui.i18n.Lang
@@ -25,6 +26,7 @@ import kotlinx.coroutines.launch
 data class UpdateInfo(
     val version: String,
     val url: String,
+    val changelog: String? = null,
 )
 
 data class UiState(
@@ -39,12 +41,14 @@ data class UiState(
     val testIpsText: String = "",
     val fallbackDomainsText: String = "",
     val updateInfo: UpdateInfo? = null,
+    val subUrl: String? = null,
 )
 
 class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     private val engine = ScanEngine()
     private val settings = SettingsStore(app)
+    private val subServer = SubServer()
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -88,16 +92,18 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
             if (conn.responseCode == 200) {
                 val response = conn.inputStream.bufferedReader().readText()
-                // Crude but effective JSON extraction for tag_name and html_url
+                // Crude but effective JSON extraction for tag_name, html_url and body
                 val tagName = "\"tag_name\"\\s*:\\s*\"([^\"]+)\"".toRegex().find(response)?.groupValues?.get(1)
                 val htmlUrl = "\"html_url\"\\s*:\\s*\"([^\"]+)\"".toRegex().find(response)?.groupValues?.get(1)
+                val body = "\"body\"\\s*:\\s*\"([^\"]+)\"".toRegex().find(response)?.groupValues?.get(1)
+                    ?.replace("\\r\\n", "\n")?.replace("\\n", "\n")
 
                 val app = getApplication<Application>()
                 val packageInfo = app.packageManager.getPackageInfo(app.packageName, 0)
                 val currentVersion = "v${packageInfo.versionName}"
 
                 if (tagName != null && htmlUrl != null && tagName != currentVersion) {
-                    _state.update { it.copy(updateInfo = UpdateInfo(tagName, htmlUrl)) }
+                    _state.update { it.copy(updateInfo = UpdateInfo(tagName, htmlUrl, body)) }
                 }
             }
         } catch (e: Exception) {
@@ -187,10 +193,15 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         val proxy = s.parsedProxy   // may be null — modes that scan random/explicit IPs
         if (s.isScanning) return
         _state.update { it.copy(isScanning = true, progress = ScanProgress(phase = ScanPhase.PROBING)) }
+        
+        // Start sub server
+        viewModelScope.launch { subServer.start() }
+
         scanJob = viewModelScope.launch {
             try {
                 engine.scan(proxy, s.scanConfig).collect { p ->
-                    _state.update { it.copy(progress = p) }
+                    _state.update { it.copy(progress = p, subUrl = subServer.getUrl()) }
+                    subServer.updateResults(p.best, proxy)
                 }
             } catch (_: Throwable) {
                 // cancellation or unexpected error — handled by stop()/final state
@@ -207,12 +218,19 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     fun stop() {
         scanJob?.cancel()
         scanJob = null
+        subServer.stop()
         _state.update {
             it.copy(
                 isScanning = false,
+                subUrl = null,
                 progress = it.progress.copy(phase = ScanPhase.CANCELLED),
             )
         }
+    }
+
+    override fun onCleared() {
+        subServer.stop()
+        super.onCleared()
     }
 
     fun reset() {

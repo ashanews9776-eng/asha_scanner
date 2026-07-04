@@ -119,6 +119,26 @@ fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
                     }
                 }
                 Spacer8()
+                // ---- Local Subscription Link ----
+                state.subUrl?.let { url ->
+                    Box(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
+                            .background(AccentMuted.copy(alpha = 0.1f))
+                            .border(0.5.dp, AccentBorder.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                            .clickable {
+                                clipboard.setText(AnnotatedString(url))
+                                snack = s.localSub
+                            }.padding(12.dp)
+                    ) {
+                        Column {
+                            Text(s.localSub, color = Accent, fontFamily = labelFont, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text(url, color = TextPrimaryC, fontFamily = ShareTechMono, fontSize = 12.sp)
+                            Text(s.localSubDesc, color = TextMutedC, fontFamily = labelFont, fontSize = 9.sp)
+                        }
+                    }
+                    Spacer8()
+                }
+
                 // ---- Ready-to-use config links (only when a config was pasted) ----
                 if (proxy != null && results.isNotEmpty()) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

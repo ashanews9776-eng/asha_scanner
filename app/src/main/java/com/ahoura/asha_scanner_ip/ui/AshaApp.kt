@@ -120,6 +120,7 @@ fun AshaApp(vm: ScanViewModel) {
                         UpdateDialog(
                             version = info.version,
                             url = info.url,
+                            changelog = info.changelog,
                             onDismiss = { vm.dismissUpdate() }
                         )
                     }
