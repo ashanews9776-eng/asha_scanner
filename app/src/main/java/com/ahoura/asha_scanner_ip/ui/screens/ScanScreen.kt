@@ -21,7 +21,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -37,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +61,7 @@ import com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn
 import com.ahoura.asha_scanner_ip.ui.theme.displayFamily
 import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 import com.ahoura.asha_scanner_ip.ui.components.ColoBadge
+import com.ahoura.asha_scanner_ip.ui.components.LottieSonar
 import com.ahoura.asha_scanner_ip.ui.components.RadarSweep
 import com.ahoura.asha_scanner_ip.ui.components.NeonProgressBar
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
@@ -170,7 +176,7 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
             }
         }
 
-        // ---- Live radar sweep hero (probe / resolve phases) ----
+        // ---- Hero section (Radar for Phase 1, Speed Pulse for Phase 2) ----
         if (p.phase == ScanPhase.PROBING || resolving) {
             Spacer8()
             val scopeColor = if (resolving) OrangeC else Accent
@@ -208,6 +214,28 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
                     fontSize = if (fa) 9.sp else 8.sp, letterSpacing = if (fa) 0.sp else 1.sp,
                     modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = 10.dp, vertical = 6.dp),
                 )
+            }
+        } else if (validating) {
+            Spacer8()
+            Box(
+                Modifier.fillMaxWidth().height(132.dp).clip(RoundedCornerShape(6.dp))
+                    .background(SurfaceC).border(0.5.dp, BlueC.copy(alpha = 0.5f), RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                // Network pulse animation for speed test
+                LottieSonar(Modifier.size(110.dp).graphicsLayer { alpha = 0.6f; scaleX = 1.5f; scaleY = 1.5f })
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        androidx.compose.material.icons.Icons.Filled.CloudDownload,
+                        null, tint = BlueC, modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        if (fa) "تست سرعت دانلود..." else "MEASURING THROUGHPUT...",
+                        color = BlueC, fontFamily = ShareTechMono, fontSize = 12.sp,
+                        letterSpacing = 1.sp, fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
 
@@ -346,6 +374,9 @@ private fun ResultRow(r: ScanResult, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(r.ip, color = ipColor, fontFamily = ShareTechMono, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        if (!r.speedTested && r.healthy) {
+            Text("TESTING...", color = BlueC, fontFamily = ShareTechMono, fontSize = 9.sp, modifier = Modifier.padding(end = 8.dp))
+        }
         MetricCell(avg.toString(), latencyColor(avg), Modifier.width(48.dp))
         MetricCell("$lossPct", lossColor(lossPct), Modifier.width(44.dp))
         MetricCell(if (r.speedTested) dl.toString() else "·", dlColor(dl, r.speedTested), Modifier.width(52.dp))

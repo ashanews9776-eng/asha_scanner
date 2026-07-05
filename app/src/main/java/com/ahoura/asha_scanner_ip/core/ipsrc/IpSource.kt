@@ -7,7 +7,7 @@ import kotlin.random.Random
 /**
  * Generates random candidate IPs from Cloudflare's published CIDR ranges.
  *
- * Kotlin port of SenPaiScanner's `internal/ipsrc`. IPv4 ranges are treated as
+ * IPv4 ranges are treated as
  * 32-bit integers (base | random-host-offset); IPv6 ranges randomise the host
  * portion byte-by-byte. The [stream] sequence de-duplicates emitted addresses.
  */

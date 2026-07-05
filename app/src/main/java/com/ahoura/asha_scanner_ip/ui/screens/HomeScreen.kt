@@ -89,7 +89,7 @@ fun HomeScreen(
             TypewriterText(s.homeSubtitle, color = TextMutedC, fontSize = 9.sp, letterSpacing = 2.sp)
         }
         Spacer(Modifier.size(8.dp))
-        StaggerIn(0) { Pill("v0.6.0 · IR-OPTIMIZED") }
+        StaggerIn(0) { Pill("v0.6.2 · IR-OPTIMIZED") }
 
         Spacer(Modifier.size(24.dp))
 
