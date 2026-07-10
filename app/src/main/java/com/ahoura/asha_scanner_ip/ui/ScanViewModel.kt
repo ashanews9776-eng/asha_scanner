@@ -42,6 +42,7 @@ data class UiState(
     val fallbackDomainsText: String = "",
     val updateInfo: UpdateInfo? = null,
     val subUrl: String? = null,
+    val ispInfo: String = "Detecting ISP...",
 )
 
 class ScanViewModel(app: Application) : AndroidViewModel(app) {
@@ -78,8 +79,93 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             checkUpdate()
+            detectIpInfo()
         }
     }
+
+    private fun detectIpInfo() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _state.update { it.copy(ispInfo = "Analyzing Network...") }
+            
+            // 1. Get Cloudflare Trace info (most reliable way)
+            val cfInfo = fetchCloudflareTrace()
+            
+            // 2. Try to get a more descriptive ISP name from APIs if possible
+            val apiIsp = if (cfInfo == null || cfInfo.isp.isEmpty()) fetchIspFromMultipleApis() else null
+            
+            val finalIsp = apiIsp ?: cfInfo?.isp ?: "Unknown Provider"
+            val finalLoc = cfInfo?.loc ?: "??"
+            val finalColo = cfInfo?.colo ?: "???"
+            
+            val finalInfo = if (cfInfo != null || apiIsp != null) {
+                "$finalIsp ($finalLoc · $finalColo)"
+            } else {
+                "Offline / Unknown"
+            }
+            
+            _state.update { it.copy(ispInfo = finalInfo) }
+        }
+    }
+
+    private fun fetchCloudflareTrace(): TraceBasic? {
+        val endpoints = listOf(
+            "https://1.1.1.1/cdn-cgi/trace",
+            "http://1.1.1.1/cdn-cgi/trace"
+        )
+        
+        for (urlStr in endpoints) {
+            try {
+                val url = java.net.URL(urlStr)
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 3000
+                if (conn.responseCode == 200) {
+                    val lines = conn.inputStream.bufferedReader().readLines()
+                    val colo = lines.find { it.startsWith("colo=") }?.split("=")?.getOrNull(1) ?: "???"
+                    val loc = lines.find { it.startsWith("loc=") }?.split("=")?.getOrNull(1) ?: "??"
+                    val asLine = lines.find { it.startsWith("as=") }?.split("=")?.getOrNull(1) ?: ""
+                    
+                    // Comprehensive mapping for Iranian ISPs
+                    val isp = when {
+                        asLine.contains("196822") || asLine.contains("43754") -> "MCI"
+                        asLine.contains("44244") || asLine.contains("197285") || asLine.contains("201193") -> "Irancell"
+                        asLine.contains("31549") -> "Rightel"
+                        asLine.contains("56433") -> "Shatel"
+                        asLine.contains("12880") || asLine.contains("51070") -> "Mokhaberat"
+                        asLine.contains("16322") -> "ParsOnline"
+                        asLine.contains("44376") -> "Asiatech"
+                        asLine.contains("206065") -> "Zitel"
+                        asLine.contains("50810") -> "Mobinnet"
+                        asLine.isNotEmpty() -> asLine.removePrefix("AS").split(" ").getOrNull(0) ?: ""
+                        else -> ""
+                    }
+                    return TraceBasic(colo, loc, isp)
+                }
+            } catch (e: Exception) { continue }
+        }
+        return null
+    }
+
+    private fun fetchIspFromMultipleApis(): String? {
+        val apis = listOf(
+            "http://ip-api.com/json/?fields=isp",
+            "https://api.db-ip.com/v2/free/self/organization"
+        )
+        for (apiUrl in apis) {
+            try {
+                val url = java.net.URL(apiUrl)
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 2500
+                if (conn.responseCode == 200) {
+                    val res = conn.inputStream.bufferedReader().readText().trim()
+                    val found = "\"([^\"]+)\"".toRegex().findAll(res).lastOrNull()?.groupValues?.get(1)
+                    if (found != null && found.length < 40 && !found.contains("{")) return found
+                }
+            } catch (e: Exception) { continue }
+        }
+        return null
+    }
+
+    private data class TraceBasic(val colo: String, val loc: String, val isp: String)
 
     private fun checkUpdate() {
         try {
@@ -139,6 +225,10 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                 configText = text,
                 parsedProxy = parsed,
                 parseError = trimmed.isNotEmpty() && parsed == null,
+                scanConfig = if (parsed != null) it.scanConfig.copy(
+                    ports = listOf(parsed.port),
+                    sniOverride = parsed.effectiveSni()
+                ) else it.scanConfig
             )
         }
     }

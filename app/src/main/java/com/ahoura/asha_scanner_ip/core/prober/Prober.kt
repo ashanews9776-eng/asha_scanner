@@ -49,23 +49,34 @@ class Prober(private val cfg: ScanConfig) {
             var ssl: SSLSocket? = null
             try {
                 socket = Tls.dial(ip, port, dialTo)
+                val useTls = Tls.isCloudflareTlsPort(port) || (cfg.mode != ProbeMode.TCP && !Tls.isCloudflareHttpPort(port))
+
                 when (cfg.mode) {
                     ProbeMode.TCP -> {
                         latencies.add(elapsedMs(start))
                     }
                     ProbeMode.TLS -> {
-                        ssl = Tls.handshake(socket, ip, port, sni, emptyList(), insecure = true, tlsTo)
-                        tlsOk = true
-                        latencies.add(elapsedMs(start))
+                        if (useTls) {
+                            ssl = Tls.handshake(socket, ip, port, sni, emptyList(), insecure = true, tlsTo)
+                            tlsOk = true
+                            latencies.add(elapsedMs(start))
+                        } else {
+                            // If user asked for TLS on an HTTP port, we just do TCP as fallback
+                            latencies.add(elapsedMs(start))
+                        }
                     }
                     ProbeMode.HTTP -> {
-                        ssl = Tls.handshake(socket, ip, port, sni, listOf("http/1.1"), insecure = true, tlsTo)
-                        tlsOk = true
-                        val resp = httpTrace(ssl, hostHeader = sni, timeoutMs = httpTo)
+                        val resp = if (useTls) {
+                            ssl = Tls.handshake(socket, ip, port, sni, listOf("http/1.1"), insecure = true, tlsTo)
+                            tlsOk = true
+                            httpTrace(ssl, null, sni, httpTo)
+                        } else {
+                            httpTrace(null, socket, sni, httpTo)
+                        }
+
                         if (resp != null) {
                             httpStatus = resp.status
                             if (resp.colo.isNotEmpty()) colo = resp.colo
-                            // Only count latency when we got a real Cloudflare response.
                             if (resp.status in 200..399 || resp.colo.isNotEmpty()) {
                                 latencies.add(elapsedMs(start))
                             }
@@ -104,8 +115,13 @@ class Prober(private val cfg: ScanConfig) {
         return when (r.mode) {
             ProbeMode.TCP -> true
             ProbeMode.TLS -> r.tlsOk
-            ProbeMode.HTTP ->
-                r.tlsOk && (r.httpStatus in 200..399 || r.colo.isNotEmpty())
+            ProbeMode.HTTP -> {
+                // If the port is a known TLS port, we require tlsOk. 
+                // Otherwise (like port 2086), we only care about the HTTP response.
+                val expectTls = Tls.isCloudflareTlsPort(r.port)
+                if (expectTls && !r.tlsOk) return false
+                r.httpStatus in 200..399 || r.colo.isNotEmpty()
+            }
         }
     }
 
@@ -121,8 +137,12 @@ class Prober(private val cfg: ScanConfig) {
 
     private data class TraceResp(val status: Int, val colo: String)
 
-    private fun httpTrace(ssl: SSLSocket, hostHeader: String, timeoutMs: Int): TraceResp? {
-        ssl.soTimeout = timeoutMs
+    private fun httpTrace(ssl: SSLSocket?, plain: Socket?, hostHeader: String, timeoutMs: Int): TraceResp? {
+        if (ssl == null && plain == null) return null
+        
+        val socket = ssl ?: plain!!
+        socket.soTimeout = timeoutMs
+        
         val host = hostHeader.ifBlank { "speed.cloudflare.com" }
         val req = buildString {
             append("GET /cdn-cgi/trace HTTP/1.1\r\n")
@@ -131,10 +151,25 @@ class Prober(private val cfg: ScanConfig) {
             append("Accept: */*\r\n")
             append("Connection: close\r\n\r\n")
         }
-        ssl.outputStream.write(req.toByteArray(Charsets.US_ASCII))
-        ssl.outputStream.flush()
+        
+        val bytes = req.toByteArray(Charsets.US_ASCII)
+        val out = socket.getOutputStream()
+        
+        if (cfg.fragment) {
+            // Anti-filter: send request in small chunks (fragmentation)
+            for (i in bytes.indices step 2) {
+                val len = if (i + 2 <= bytes.size) 2 else 1
+                out.write(bytes, i, len)
+                out.flush()
+                // Randomized delay between 1-5ms to dodge pattern detection
+                Thread.sleep(1L + Random.nextLong(4))
+            }
+        } else {
+            out.write(bytes)
+            out.flush()
+        }
 
-        val reader: BufferedReader = ssl.inputStream.bufferedReader(Charsets.ISO_8859_1)
+        val reader: BufferedReader = socket.getInputStream().bufferedReader(Charsets.ISO_8859_1)
         val statusLine = reader.readLine() ?: return null
         val status = parseStatus(statusLine)
         var colo = ""

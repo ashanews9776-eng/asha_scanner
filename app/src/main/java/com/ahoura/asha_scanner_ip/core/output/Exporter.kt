@@ -13,7 +13,7 @@ object Exporter {
     /** Ready-to-use config links (clean IP swapped into the user's proxy link). */
     fun configs(results: List<ScanResult>, proxy: ProxyConfig?): String {
         if (proxy == null) return endpoints(results)
-        return results.joinToString("\n") { ConfigLinkBuilder.withAddress(proxy, it.ip) }
+        return results.joinToString("\n") { ConfigLinkBuilder.withAddress(proxy, it.ip, it.port) }
     }
 
     /** CSV with full metrics. */

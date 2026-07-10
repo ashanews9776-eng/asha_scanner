@@ -78,6 +78,7 @@ fun AshaApp(vm: ScanViewModel) {
                     ) { route ->
                         when (route) {
                             Route.HOME -> HomeScreen(
+                                vm = vm,
                                 onQuick = { push(Route.QUICK) },
                                 onCustom = { push(Route.CUSTOM) },
                                 onTest = { push(Route.TEST) },

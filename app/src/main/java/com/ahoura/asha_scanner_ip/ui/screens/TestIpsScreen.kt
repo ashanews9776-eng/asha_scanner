@@ -114,14 +114,15 @@ fun TestIpsScreen(vm: ScanViewModel, onBack: () -> Unit, onStart: () -> Unit) {
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                InfoChip(state.scanConfig.mode.wire.uppercase()); InfoChip("443"); InfoChip("6 TRIES")
+                val port = state.scanConfig.ports.firstOrNull() ?: 443
+                InfoChip(state.scanConfig.mode.wire.uppercase()); InfoChip("$port"); InfoChip("6 TRIES")
                 InfoChip("10s"); InfoChip("20 WORKERS"); InfoChip("speed.cloudflare.com")
             }
         }
         Column(Modifier.padding(12.dp)) {
             ScanButton(text = "▶  ${s.startTest}", icon = Icons.Filled.PlayArrow, enabled = count > 0) {
                 vm.updateScanConfig {
-                    it.copy(ports = listOf(443), tries = 6, timeoutMs = 10_000, concurrency = 20, speedTest = true, top = 50, smartStop = false)
+                    it.copy(tries = 6, timeoutMs = 10_000, concurrency = 20, speedTest = true, top = 50, smartStop = false)
                 }
                 onStart()
             }

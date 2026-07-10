@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +60,7 @@ private val Teal = Color(0xFF14B8A6)
 
 @Composable
 fun HomeScreen(
+    vm: com.ahoura.asha_scanner_ip.ui.ScanViewModel,
     onQuick: () -> Unit,
     onCustom: () -> Unit,
     onTest: () -> Unit,
@@ -68,6 +71,7 @@ fun HomeScreen(
     val context = LocalContext.current
     val s = LocalStrings.current
     val lang = LocalLang.current
+    val state by vm.state.collectAsState()
 
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
         Spacer(Modifier.size(24.dp))
@@ -89,7 +93,7 @@ fun HomeScreen(
             TypewriterText(s.homeSubtitle, color = TextMutedC, fontSize = 9.sp, letterSpacing = 2.sp)
         }
         Spacer(Modifier.size(8.dp))
-        StaggerIn(0) { Pill("v0.6.2 · IR-OPTIMIZED") }
+        StaggerIn(0) { Pill("v0.6.3 · IR-OPTIMIZED") }
 
         Spacer(Modifier.size(24.dp))
 
@@ -130,23 +134,33 @@ fun HomeScreen(
         Spacer(Modifier.weight(1f))
 
         // ---- Footer ----
-        Row(
-            Modifier.fillMaxWidth().padding(vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            val footFont = if (lang == Lang.FA) Vazirmatn else ShareTechMono
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${s.cfRanges} ", color = TextFadedC, fontFamily = footFont, fontSize = 8.sp)
-                Text("${CloudflareRanges.V4.size}", color = Accent, fontFamily = ShareTechMono, fontSize = 8.sp)
-                Text(" ${s.cidrs}", color = TextFadedC, fontFamily = footFont, fontSize = 8.sp)
-            }
+        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
             Text(
-                if (lang == Lang.FA) s.license else s.license.uppercase(),
-                color = TextSecondaryC, fontFamily = footFont, fontSize = 8.sp,
-                letterSpacing = if (lang == Lang.FA) 0.sp else 1.sp,
-                modifier = Modifier.clickable(onClick = onAbout),
+                text = "NETWORK: ${state.ispInfo}".uppercase(),
+                color = Accent,
+                fontFamily = ShareTechMono,
+                fontSize = 8.sp,
+                letterSpacing = 1.sp
             )
+            Spacer(Modifier.size(4.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                val footFont = if (lang == Lang.FA) Vazirmatn else ShareTechMono
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${s.cfRanges} ", color = TextFadedC, fontFamily = footFont, fontSize = 8.sp)
+                    Text("${CloudflareRanges.V4.size}", color = Accent, fontFamily = ShareTechMono, fontSize = 8.sp)
+                    Text(" ${s.cidrs}", color = TextFadedC, fontFamily = footFont, fontSize = 8.sp)
+                }
+                Text(
+                    if (lang == Lang.FA) s.license else s.license.uppercase(),
+                    color = TextSecondaryC, fontFamily = footFont, fontSize = 8.sp,
+                    letterSpacing = if (lang == Lang.FA) 0.sp else 1.sp,
+                    modifier = Modifier.clickable(onClick = onAbout),
+                )
+            }
         }
     }
 }

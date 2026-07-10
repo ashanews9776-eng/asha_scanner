@@ -82,10 +82,12 @@ fun ScanSettings(vm: ScanViewModel, cfg: ScanConfig, showAdvancedDefault: Boolea
     var customCount by remember { mutableStateOf(false) }
     var customWorkers by remember { mutableStateOf(false) }
     var customTimeout by remember { mutableStateOf(false) }
+    var customPort by remember { mutableStateOf(false) }
 
     val counts = listOf(5_000, 20_000, 100_000)
     val workers = listOf(50, 100, 200)
     val timeouts = listOf(3, 5, 10)
+    val ports = listOf(443, 2053, 2083, 2086, 2096, 8443)
 
     Spacer(Modifier.size(8.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -145,6 +147,23 @@ fun ScanSettings(vm: ScanViewModel, cfg: ScanConfig, showAdvancedDefault: Boolea
         }, keyboardType = KeyboardType.Number)
     }
 
+    Spacer(Modifier.size(6.dp))
+    SectionLabel(s.port)
+    Spacer(Modifier.size(6.dp))
+    PresetRow(
+        options = ports.map { it.toString() } + "···",
+        selectedIndex = if (customPort) ports.size else cfg.ports.firstOrNull()?.let { ports.indexOf(it) }.let { if (it == null || it < 0) ports.size else it },
+    ) { i ->
+        if (i < ports.size) { customPort = false; vm.updateScanConfig { it.copy(ports = listOf(ports[i])) } }
+        else customPort = true
+    }
+    if (customPort) {
+        Spacer(Modifier.size(6.dp))
+        KvInput("port", (cfg.ports.firstOrNull() ?: 443).toString(), { v ->
+            v.toIntOrNull()?.let { n -> vm.updateScanConfig { it.copy(ports = listOf(n.coerceIn(1, 65535))) } }
+        }, keyboardType = KeyboardType.Number)
+    }
+
     Spacer(Modifier.size(10.dp))
     Row(
         Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(vertical = 8.dp),
@@ -174,6 +193,15 @@ fun ScanSettings(vm: ScanViewModel, cfg: ScanConfig, showAdvancedDefault: Boolea
                 Text("Measure real download throughput", color = TextSecondaryC, fontSize = 10.sp)
             }
             ToggleSwitch(cfg.speedTest) { v -> vm.updateScanConfig { it.copy(speedTest = v) } }
+        }
+
+        Spacer(Modifier.size(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(s.fragment, color = Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(s.fragmentDesc, color = TextSecondaryC, fontSize = 10.sp, lineHeight = 14.sp)
+            }
+            ToggleSwitch(cfg.fragment) { v -> vm.updateScanConfig { it.copy(fragment = v) } }
         }
 
         Spacer(Modifier.size(10.dp))

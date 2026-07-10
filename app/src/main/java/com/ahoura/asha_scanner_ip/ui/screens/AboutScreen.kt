@@ -57,7 +57,7 @@ fun AboutScreen(onBack: () -> Unit) {
         Column(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Spacer(Modifier.size(8.dp))
             Text("ASHA SCANNER", color = Accent, fontFamily = ShareTechMono, fontSize = 16.sp, letterSpacing = 2.sp)
-            Pill("v0.6.2 · IR-OPTIMIZED")
+            Pill("v0.6.3 · IR-OPTIMIZED")
             Text(
                 s.aboutBlurb,
                 color = TextSecondaryC,

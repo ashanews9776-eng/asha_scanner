@@ -89,7 +89,7 @@ class ScannerLogicTest {
         val proxy = ProxyParser.parse(
             "vless://uuid-1@example.com:443?security=tls&sni=test.com&type=ws&path=%2Fp#node"
         )
-        val link = ConfigLinkBuilder.withAddress(proxy, "104.16.1.2")
+        val link = ConfigLinkBuilder.withAddress(proxy, "104.16.1.2", 443)
         assertTrue("address swapped", link.contains("@104.16.1.2:443"))
         assertFalse("original domain not left as address", link.contains("@example.com:"))
         assertTrue("existing sni preserved", link.contains("sni=test.com"))
@@ -100,7 +100,7 @@ class ScannerLogicTest {
     @Test
     fun configLinkInjectsSniWhenMissing() {
         val proxy = ProxyParser.parse("vless://uuid-1@example.com:443?security=tls#node")
-        val link = ConfigLinkBuilder.withAddress(proxy, "104.16.1.2")
+        val link = ConfigLinkBuilder.withAddress(proxy, "104.16.1.2", 443)
         assertTrue("address swapped", link.contains("@104.16.1.2:443"))
         assertTrue("sni injected from domain", link.contains("sni=example.com"))
     }
@@ -108,7 +108,7 @@ class ScannerLogicTest {
     @Test
     fun configLinkBracketsIpv6() {
         val proxy = ProxyParser.parse("trojan://pw@example.com:443?security=tls#t")
-        val link = ConfigLinkBuilder.withAddress(proxy, "2606:4700::1")
+        val link = ConfigLinkBuilder.withAddress(proxy, "2606:4700::1", 443)
         assertTrue("ipv6 bracketed", link.contains("@[2606:4700::1]:443"))
         assertTrue("sni injected", link.contains("sni=example.com"))
     }

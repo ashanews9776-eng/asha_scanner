@@ -23,19 +23,21 @@ object ResultSort {
         )
     }
 
-    /** Healthy first, then lowest average latency. Used during Phase 1. */
+    /** Healthy first, then highest pass rate, then lowest average latency. Used during Phase 1. */
     fun byLatency(results: List<ScanResult>): List<ScanResult> =
         results.sortedWith(
             compareByDescending<ScanResult> { it.healthy }
+                .thenByDescending { it.passRate }
                 .thenBy { if (it.avgLatencyMs <= 0) Double.MAX_VALUE else it.avgLatencyMs }
                 .thenByDescending { it.tlsOk }
                 .thenBy { it.ip }
         )
 
-    /** Healthy first, then highest throughput, then latency. Used for final ranking. */
+    /** Healthy first, then highest pass rate, then highest throughput, then latency. Used for final ranking. */
     fun bySpeed(results: List<ScanResult>): List<ScanResult> =
         results.sortedWith(
             compareByDescending<ScanResult> { it.healthy }
+                .thenByDescending { it.passRate }
                 .thenByDescending { it.throughputBytesPerSec }
                 .thenBy { if (it.avgLatencyMs <= 0) Double.MAX_VALUE else it.avgLatencyMs }
                 .thenBy { it.ip }

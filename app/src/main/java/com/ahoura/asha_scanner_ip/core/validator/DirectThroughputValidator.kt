@@ -32,11 +32,18 @@ class DirectThroughputValidator(
         var ssl: SSLSocket? = null
         try {
             socket = Tls.dial(result.ip, result.port, connectTo)
-            ssl = Tls.handshake(
-                socket, result.ip, result.port, sni,
-                alpn = listOf("http/1.1"), insecure = true, handshakeTimeoutMs = connectTo,
-            )
-            ssl.soTimeout = windowMs.toInt() + 2000
+            val useTls = Tls.isCloudflareTlsPort(result.port) || !Tls.isCloudflareHttpPort(result.port)
+            
+            val activeSocket: Socket = if (useTls) {
+                ssl = Tls.handshake(
+                    socket, result.ip, result.port, sni,
+                    alpn = listOf("http/1.1"), insecure = true, handshakeTimeoutMs = connectTo,
+                )
+                ssl
+            } else {
+                socket
+            }
+            activeSocket.soTimeout = windowMs.toInt() + 2000
 
             val req = buildString {
                 append("GET /__down?bytes=").append(downloadBytes).append(" HTTP/1.1\r\n")
@@ -46,10 +53,10 @@ class DirectThroughputValidator(
                 append("Connection: close\r\n\r\n")
             }
             val startNs = System.nanoTime()
-            ssl.outputStream.write(req.toByteArray(Charsets.US_ASCII))
-            ssl.outputStream.flush()
+            activeSocket.outputStream.write(req.toByteArray(Charsets.US_ASCII))
+            activeSocket.outputStream.flush()
 
-            val input = ssl.inputStream
+            val input = activeSocket.inputStream
             val buf = ByteArray(32 * 1024)
             var firstByteNs = 0L
             var headerDone = false

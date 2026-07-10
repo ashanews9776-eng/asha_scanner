@@ -74,6 +74,7 @@ data class ScanConfig(
     val top: Int = 10,
     val speedTest: Boolean = true,   // run Phase-2 throughput validation on the top results
     val smartStop: Boolean = true,   // stop Phase-1 early once plenty of healthy IPs are found
+    val fragment: Boolean = false,   // attempt TLS fragmentation to dodge DPI
     val sniOverride: String = "",    // optional manual SNI; blank -> rotate/derive
     val extraCidrs: List<String> = emptyList(),
     // Precise CF IPv4 ranges loaded from the bundled asset (ircfspace list).
@@ -111,6 +112,7 @@ data class ScanResult(
     val throughputBytesPerSec: Double = 0.0,
     val speedTested: Boolean = false,
     val healthy: Boolean = false,
+    val passRate: Double = 1.0,  // Fraction of successful handshakes in stability phase
     val timestamp: Long = 0L,
 ) {
     val endpoint: String get() = if (ip.contains(":")) "[$ip]:$port" else "$ip:$port"
@@ -135,7 +137,7 @@ data class ScanResult(
 }
 
 /** Lifecycle of a scan run. */
-enum class ScanPhase { IDLE, PROBING, RESOLVING, VALIDATING, DONE, CANCELLED, ERROR }
+enum class ScanPhase { IDLE, PROBING, RESOLVING, STABILITY, VALIDATING, DONE, CANCELLED, ERROR }
 
 /** Streamed progress snapshot emitted by the engine while scanning. */
 data class ScanProgress(
@@ -155,4 +157,6 @@ data class ScanProgress(
     // oscilloscope. A value of 0 marks a miss/timeout (drawn as a dropout spike).
     // Bounded by the engine, oldest-first, so the UI just plots it left→right.
     val latencyTrace: List<Int> = emptyList(),
+    // Live logs for the hacker-terminal view
+    val logs: List<String> = emptyList(),
 )

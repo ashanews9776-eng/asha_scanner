@@ -16,9 +16,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +41,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ahoura.asha_scanner_ip.core.engine.QualityGrade
 import com.ahoura.asha_scanner_ip.core.engine.ResultSort
 import com.ahoura.asha_scanner_ip.core.model.ScanResult
 import com.ahoura.asha_scanner_ip.core.output.ConfigLinkBuilder
@@ -48,6 +52,7 @@ import com.ahoura.asha_scanner_ip.ui.components.CyberAppBar
 import com.ahoura.asha_scanner_ip.ui.components.LottieSonar
 import com.ahoura.asha_scanner_ip.ui.components.ScanButton
 import com.ahoura.asha_scanner_ip.ui.components.StaggerIn
+import com.ahoura.asha_scanner_ip.ui.components.TracerouteDialog
 import com.ahoura.asha_scanner_ip.ui.i18n.Lang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
@@ -81,6 +86,8 @@ fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
     val s = LocalStrings.current
     val lang = LocalLang.current
     var snack by remember { mutableStateOf<String?>(null) }
+    var traceResult by remember { mutableStateOf<ScanResult?>(null) }
+    var showLegend by remember { mutableStateOf(false) }
 
     LaunchedEffect(snack) { if (snack != null) { kotlinx.coroutines.delay(1800); snack = null } }
 
@@ -94,7 +101,23 @@ fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            CyberAppBar(title = s.results, onBack = onBack)
+            CyberAppBar(
+                title = s.results,
+                onBack = onBack,
+                trailing = {
+                    Box(
+                        Modifier.size(40.dp).clip(RoundedCornerShape(6.dp))
+                            .clickable { showLegend = !showLegend },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (showLegend) Icons.Default.Close else Icons.Default.HelpOutline,
+                            contentDescription = "help",
+                            tint = Accent, modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            )
             Column(Modifier.padding(horizontal = 12.dp)) {
                 // ---- Header numbers ----
                 val labelFont = if (lang == Lang.FA) com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn else ShareTechMono
@@ -119,6 +142,12 @@ fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
                     }
                 }
                 Spacer8()
+                // ---- Quality Legend ----
+                if (showLegend) {
+                    GradeLegend()
+                    Spacer8()
+                }
+
                 // ---- Local Subscription Link ----
                 state.subUrl?.let { url ->
                     Box(
@@ -198,14 +227,21 @@ fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
                 itemsIndexed(results, key = { _, r -> r.endpoint }) { index, r ->
                     val rank = index + 1
                     StaggerIn(rank.coerceAtMost(12)) {
-                        ResultRowFull(rank, r, hasConfig = proxy != null) {
-                            if (proxy != null) {
-                                clipboard.setText(AnnotatedString(ConfigLinkBuilder.withAddress(proxy, r.ip)))
-                                snack = s.copiedConfigFor.format(r.ip)
-                            } else {
-                                clipboard.setText(AnnotatedString(r.ip)); snack = s.copiedIp.format(r.ip)
+                        ResultRowFull(
+                            rank = rank,
+                            r = r,
+                            hasConfig = proxy != null,
+                            onTrace = { traceResult = r },
+                            onGradeClick = { showLegend = true },
+                            onCopy = {
+                                if (proxy != null) {
+                                    clipboard.setText(AnnotatedString(ConfigLinkBuilder.withAddress(proxy, r.ip, r.port)))
+                                    snack = s.copiedConfigFor.format(r.ip)
+                                } else {
+                                    clipboard.setText(AnnotatedString(r.ip)); snack = s.copiedIp.format(r.ip)
+                                }
                             }
-                        }
+                        )
                     }
                 }
                 item { Spacer8() }
@@ -214,6 +250,10 @@ fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
             Column(Modifier.padding(12.dp)) {
                 ScanButton(text = "↻  ${s.scanAgain}", onClick = onAgain)
             }
+        }
+
+        traceResult?.let { r ->
+            TracerouteDialog(ip = r.ip, colo = r.colo, onDismiss = { traceResult = null })
         }
 
         // ---- Snackbar overlay ----
@@ -247,7 +287,16 @@ private fun ActionBtn(text: String, fg: Color, bg: Color, border: Color, modifie
 }
 
 @Composable
-private fun ResultRowFull(rank: Int, r: ScanResult, hasConfig: Boolean, onCopy: () -> Unit) {
+private fun ResultRowFull(
+    rank: Int,
+    r: ScanResult,
+    hasConfig: Boolean,
+    onTrace: () -> Unit,
+    onGradeClick: () -> Unit,
+    onCopy: () -> Unit
+) {
+    val s = LocalStrings.current
+    val grade = com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.evaluate(r)
     val rankColor = when (rank) {
         1 -> GoldC
         2, 3 -> SilverC
@@ -256,20 +305,44 @@ private fun ResultRowFull(rank: Int, r: ScanResult, hasConfig: Boolean, onCopy: 
     val ipColor = if (rank <= 3) Accent else TextPrimaryC
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(5.dp)).background(SurfaceC)
-            .border(0.5.dp, BorderC, RoundedCornerShape(5.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+            .border(0.5.dp, BorderC, RoundedCornerShape(5.dp))
+            .clickable(onClick = onTrace)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             rank.toString().padStart(2, '0'), color = rankColor, fontFamily = ShareTechMono,
             fontSize = 12.sp, modifier = Modifier.width(24.dp),
         )
+        Box(
+            Modifier.size(24.dp).clip(CircleShape).background(gradeColor(grade))
+                .clickable(onClick = onGradeClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(grade.label, color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = ShareTechMono)
+        }
         Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
             Text(r.ip, color = ipColor, fontFamily = ShareTechMono, fontSize = 13.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("${r.avgLatencyMs.toInt()}ms", color = latency(r.avgLatencyMs.toInt()), fontFamily = ShareTechMono, fontSize = 10.sp)
                 Text("loss ${(r.loss * 100).toInt()}%", color = TextMutedC, fontFamily = ShareTechMono, fontSize = 10.sp)
                 if (r.speedTested && r.throughputBytesPerSec > 0) {
-                    Text("${(r.throughputBytesPerSec / 1024).toInt()}KB/s", color = AccentDim, fontFamily = ShareTechMono, fontSize = 10.sp)
+                    Text("${String.format(java.util.Locale.US, "%.1f", r.throughputMbps)} Mbps", color = AccentDim, fontFamily = ShareTechMono, fontSize = 10.sp)
+                }
+                if (r.passRate < 1.0) {
+                    Text("pass ${(r.passRate * 100).toInt()}%", color = com.ahoura.asha_scanner_ip.ui.theme.OrangeC, fontFamily = ShareTechMono, fontSize = 10.sp)
+                }
+            }
+            // Use-case badges
+            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isGoodForGaming(r)) {
+                    QualityBadge(s.gaming, GoldC)
+                }
+                if (com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isGoodForStreaming(r)) {
+                    QualityBadge(s.streaming, Accent)
+                }
+                if (com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isStable(r)) {
+                    QualityBadge(s.stability, BlueC)
                 }
             }
         }
@@ -290,6 +363,27 @@ private fun ResultRowFull(rank: Int, r: ScanResult, hasConfig: Boolean, onCopy: 
     }
 }
 
+@Composable
+private fun QualityBadge(label: String, color: Color) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(3.dp))
+            .background(color.copy(alpha = 0.1f))
+            .border(0.5.dp, color.copy(alpha = 0.4f), RoundedCornerShape(3.dp))
+            .padding(horizontal = 4.dp, vertical = 2.dp)
+    ) {
+        Text(label, color = color, fontFamily = ShareTechMono, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+private fun gradeColor(grade: com.ahoura.asha_scanner_ip.core.engine.QualityGrade): Color = when (grade) {
+    com.ahoura.asha_scanner_ip.core.engine.QualityGrade.S -> GoldC
+    com.ahoura.asha_scanner_ip.core.engine.QualityGrade.A -> Accent
+    com.ahoura.asha_scanner_ip.core.engine.QualityGrade.B -> BlueC
+    com.ahoura.asha_scanner_ip.core.engine.QualityGrade.C -> com.ahoura.asha_scanner_ip.ui.theme.OrangeC
+    com.ahoura.asha_scanner_ip.core.engine.QualityGrade.F -> RedC
+}
+
 private fun latency(ms: Int): Color = when {
     ms <= 0 -> TextFadedC
     ms < 100 -> Accent
@@ -298,3 +392,82 @@ private fun latency(ms: Int): Color = when {
 }
 
 @Composable private fun Spacer8() = Box(Modifier.size(8.dp))
+
+@Composable
+private fun GradeLegend() {
+    val s = LocalStrings.current
+    val lang = LocalLang.current
+    val labelFont = if (lang == Lang.FA) com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn else ShareTechMono
+    val grades = listOf(
+        QualityGrade.S to s.gradeS,
+        QualityGrade.A to s.gradeA,
+        QualityGrade.B to s.gradeB,
+        QualityGrade.C to s.gradeC
+    )
+
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(SurfaceC.copy(alpha = 0.6f))
+            .border(0.5.dp, BorderC, RoundedCornerShape(6.dp))
+            .padding(10.dp)
+    ) {
+        Text(
+            s.gradeLegend, color = Accent, fontFamily = labelFont,
+            fontWeight = FontWeight.Bold, fontSize = 10.sp,
+            letterSpacing = if (lang == Lang.FA) 0.sp else 1.sp
+        )
+        Box(Modifier.size(8.dp))
+        grades.forEach { (g, desc) ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(vertical = 3.dp)
+            ) {
+                Box(
+                    Modifier.size(18.dp).clip(CircleShape).background(gradeColor(g)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(g.label, color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = ShareTechMono)
+                }
+                Box(Modifier.size(10.dp))
+                Text(
+                    desc, color = TextSecondaryC, fontSize = 11.sp,
+                    fontFamily = if (lang == Lang.FA) com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn else ShareTechMono,
+                    lineHeight = 14.sp
+                )
+            }
+        }
+
+        Box(Modifier.size(8.dp))
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(BorderC))
+        Box(Modifier.size(8.dp))
+
+        listOf(
+            s.gaming to (s.gamingDesc to GoldC),
+            s.streaming to (s.streamingDesc to Accent),
+            s.stability to (s.stabilityDesc to BlueC)
+        ).forEach { (label, data) ->
+            val (desc, color) = data
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(vertical = 3.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(color.copy(alpha = 0.1f))
+                        .border(0.5.dp, color.copy(alpha = 0.4f), RoundedCornerShape(3.dp))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text(label, color = color, fontFamily = ShareTechMono, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                }
+                Box(Modifier.size(10.dp))
+                Text(
+                    desc, color = TextSecondaryC, fontSize = 11.sp,
+                    fontFamily = if (lang == Lang.FA) com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn else ShareTechMono,
+                    lineHeight = 14.sp
+                )
+            }
+        }
+    }
+}

@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
@@ -67,6 +69,7 @@ import com.ahoura.asha_scanner_ip.ui.components.NeonProgressBar
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
 import com.ahoura.asha_scanner_ip.ui.theme.AccentDim
 import com.ahoura.asha_scanner_ip.ui.theme.BlueC
+import com.ahoura.asha_scanner_ip.ui.theme.GoldC
 import com.ahoura.asha_scanner_ip.ui.theme.AccentBorder
 import com.ahoura.asha_scanner_ip.ui.theme.AccentMuted
 import com.ahoura.asha_scanner_ip.ui.theme.BorderC
@@ -126,6 +129,7 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
         // ---- Header ----
         val title = when {
             validating -> s.measuringSpeed
+            p.phase == ScanPhase.STABILITY -> s.stabilityCheck
             resolving -> s.resolvingOpenSites
             else -> "${s.probing} · ${state.scanConfig.mode.wire.uppercase()}"
         }
@@ -150,6 +154,11 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
                     color = if (validating) AccentDim else TextSecondaryC,
                     fontFamily = monoFamily(lang), fontSize = 9.sp, letterSpacing = if (fa) 0.sp else 1.sp,
                 )
+                Text(
+                    text = "NETWORK: ${state.ispInfo}".uppercase(),
+                    color = Accent.copy(alpha = 0.7f),
+                    fontFamily = monoFamily(lang), fontSize = 8.sp, letterSpacing = 1.sp
+                )
             }
             Box(
                 Modifier.clip(RoundedCornerShape(4.dp)).background(RedC.copy(alpha = 0.08f))
@@ -157,6 +166,26 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
                     .clickable(onClick = onCancel).padding(horizontal = 12.dp, vertical = 7.dp),
             ) {
                 Text("✕ ${s.cancel}", color = RedC, fontFamily = monoFamily(lang), fontSize = 10.sp, letterSpacing = if (fa) 0.sp else 0.5.sp)
+            }
+        }
+
+        // ---- Live Hacker Terminal (Simorgh Style) ----
+        Spacer8()
+        Box(
+            Modifier.fillMaxWidth().height(80.dp).clip(RoundedCornerShape(6.dp))
+                .background(Color.Black.copy(alpha = 0.3f)).border(0.5.dp, BorderC.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                .padding(8.dp)
+        ) {
+            val logScroll = rememberScrollState()
+            LaunchedEffect(p.logs.size) { logScroll.animateScrollTo(logScroll.maxValue) }
+            Column(Modifier.verticalScroll(logScroll)) {
+                p.logs.forEach { log ->
+                    Text(
+                        log, color = Accent.copy(alpha = 0.8f), 
+                        fontFamily = ShareTechMono, fontSize = 9.sp, 
+                        lineHeight = 12.sp
+                    )
+                }
             }
         }
 
@@ -285,7 +314,7 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
             HeaderCell("IP", Modifier.weight(1f), TextAlign.Start)
             HeaderCell("MS", Modifier.width(48.dp), TextAlign.End)
             HeaderCell("LOS%", Modifier.width(44.dp), TextAlign.End)
-            HeaderCell("DL", Modifier.width(52.dp), TextAlign.End)
+            HeaderCell("MBPS", Modifier.width(52.dp), TextAlign.End)
             HeaderCell("COLO", Modifier.width(48.dp), TextAlign.End)
         }
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(BorderC))
@@ -363,7 +392,8 @@ private fun DetailLine(label: String, value: String) {
 private fun ResultRow(r: ScanResult, onClick: () -> Unit) {
     val avg = r.avgLatencyMs.toInt()
     val lossPct = (r.loss * 100).toInt()
-    val dl = (r.throughputBytesPerSec / 1024).toInt()
+    val speedMbps = r.throughputMbps
+    val grade = com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.evaluate(r)
     val ipColor = when {
         r.loss == 0.0 && avg < 100 -> Accent
         r.loss < 0.05 && avg < 150 -> TextSecondaryC
@@ -373,13 +403,27 @@ private fun ResultRow(r: ScanResult, onClick: () -> Unit) {
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(r.ip, color = ipColor, fontFamily = ShareTechMono, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        Box(
+            Modifier.size(18.dp).clip(CircleShape).background(gradeColor(grade)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(grade.label, color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = ShareTechMono)
+        }
+        Spacer(Modifier.size(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(r.ip, color = ipColor, fontFamily = ShareTechMono, fontSize = 12.sp)
+            Text("PORT: ${r.port}", color = TextMutedC, fontFamily = ShareTechMono, fontSize = 9.sp)
+        }
+        if (r.passRate < 1.0) {
+            Text("${(r.passRate * 100).toInt()}%", color = OrangeC, fontFamily = ShareTechMono, fontSize = 9.sp, modifier = Modifier.padding(end = 8.dp))
+        }
         if (!r.speedTested && r.healthy) {
             Text("TESTING...", color = BlueC, fontFamily = ShareTechMono, fontSize = 9.sp, modifier = Modifier.padding(end = 8.dp))
         }
         MetricCell(avg.toString(), latencyColor(avg), Modifier.width(48.dp))
         MetricCell("$lossPct", lossColor(lossPct), Modifier.width(44.dp))
-        MetricCell(if (r.speedTested) dl.toString() else "·", dlColor(dl, r.speedTested), Modifier.width(52.dp))
+        val speedStr = if (r.speedTested) String.format(java.util.Locale.US, "%.1f", speedMbps) else "·"
+        MetricCell(speedStr, dlColor(speedMbps), Modifier.width(52.dp))
         Box(Modifier.width(48.dp), contentAlignment = Alignment.CenterEnd) { ColoBadge(r.colo) }
     }
 }
@@ -436,16 +480,24 @@ private fun latencyColor(ms: Int): Color = when {
     else -> RedC
 }
 
+private fun gradeColor(grade: com.ahoura.asha_scanner_ip.core.engine.QualityGrade): Color = when (grade) {
+    com.ahoura.asha_scanner_ip.core.engine.QualityGrade.S -> GoldC
+    com.ahoura.asha_scanner_ip.core.engine.QualityGrade.A -> Accent
+    com.ahoura.asha_scanner_ip.core.engine.QualityGrade.B -> BlueC
+    com.ahoura.asha_scanner_ip.core.engine.QualityGrade.C -> OrangeC
+    com.ahoura.asha_scanner_ip.core.engine.QualityGrade.F -> RedC
+}
+
 private fun lossColor(pct: Int): Color = when {
     pct == 0 -> AccentDim
     pct <= 5 -> OrangeC
     else -> RedC
 }
 
-private fun dlColor(kbps: Int, tested: Boolean): Color = when {
-    !tested -> TextFadedC
-    kbps > 300 -> AccentDim
-    kbps >= 50 -> OrangeC
+private fun dlColor(mbps: Double): Color = when {
+    mbps <= 0 -> TextFadedC
+    mbps > 10.0 -> AccentDim
+    mbps >= 2.0 -> OrangeC
     else -> RedC
 }
 

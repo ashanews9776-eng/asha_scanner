@@ -23,19 +23,7 @@ import kotlinx.coroutines.launch
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * Orchestrates a full scan: Phase-1 probing fanned out across a worker pool,
- * then Phase-2 throughput validation of the best survivors. Emits a stream of
- * [ScanProgress] snapshots that the UI renders live.
- *
- * Mirrors SenPaiScanner's engine flow (probe -> rank -> validate -> rank), with
- * an added open-site fallback: if Phase-1 finds nothing, IPs resolved from
- * Cloudflare-fronted domains are probed before giving up.
- */
 class ScanEngine(
-    // Explicit override (e.g. an xray-core backed validator). When null the engine
-    // picks per-scan: tunnel-through-config when the user pasted a proxy, else a
-    // direct edge measurement.
     private val validatorOverride: Validator? = null,
 ) {
 
@@ -44,24 +32,34 @@ class ScanEngine(
         val startMs = System.currentTimeMillis()
         fun elapsed() = System.currentTimeMillis() - startMs
 
+        val logs = Collections.synchronizedList(ArrayList<String>())
+        fun log(msg: String) {
+            val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+            synchronized(logs) {
+                logs.add("[$timestamp] $msg")
+                if (logs.size > 50) logs.removeAt(0)
+            }
+        }
+
+        fun snapshotLogs() = synchronized(logs) { ArrayList(logs) }
+
         val validator: Validator = validatorOverride
             ?: if (proxy != null) TunnelValidator() else DirectThroughputValidator()
 
+        log("Engine initialized. Mode: ${cfg.mode}")
+        if (proxy != null) log("Proxy target: ${proxy.remark} (${proxy.protocol.scheme})")
+        if (cfg.sniOverride.isNotEmpty()) log("Using SNI Override: ${cfg.sniOverride}")
+
         val ports = cfg.ports.ifEmpty { listOf(443) }
-        // Map the worker count onto real threads. Dispatchers.IO alone soft-caps
-        // at 64 threads, so blocking socket probes never parallelise past that no
-        // matter how many workers we launch; a per-scan limitedParallelism view
-        // lets a "200 workers" setting actually run 200 concurrent dials.
+        log("Target Ports: ${ports.joinToString(", ")}")
         val probeDispatcher = Dispatchers.IO.limitedParallelism(cfg.concurrency.coerceIn(1, 512))
 
-        // Build the Phase-1 task stream lazily: candidate IPs are generated on
-        // demand (never fully materialised) and expanded across ports as workers
-        // pull them, so even multi-million-IP counts stay light on memory.
         val primaryTasks: Iterator<ProbeTask>
         val primaryTotal: Int
         if (cfg.explicitIps.isNotEmpty()) {
             primaryTasks = tasksFor(cfg.explicitIps.asSequence(), ports)
             primaryTotal = cfg.explicitIps.size * ports.size
+            log("Running explicit scan on ${cfg.explicitIps.size} targets")
         } else {
             val source = try {
                 IpSource.build(
@@ -71,148 +69,152 @@ class ScanEngine(
                     v4Ranges = cfg.customV4Ranges.ifEmpty { com.ahoura.asha_scanner_ip.core.ipsrc.CloudflareRanges.V4 },
                 )
             } catch (e: Exception) {
-                send(ScanProgress(phase = ScanPhase.ERROR, error = e.message, elapsedMs = elapsed()))
+                send(ScanProgress(phase = ScanPhase.ERROR, error = e.message, elapsedMs = elapsed(), logs = snapshotLogs()))
                 return@channelFlow
             }
             primaryTasks = tasksFor(source.stream(cfg.count), ports)
             primaryTotal = cfg.count * ports.size
+            log("Phase 1: Probing $primaryTotal random targets")
         }
 
         val healthy = Collections.synchronizedList(ArrayList<ScanResult>())
         val foundCount = AtomicInteger(0)
         val prober = Prober(cfg)
-        // Shared rolling latency trace feeding the live oscilloscope. Continuous
-        // across the primary and fallback passes so the waveform doesn't reset.
         val latencyTrace = Collections.synchronizedList(ArrayList<Int>())
 
-        // ---- Phase 1: probe the primary candidates -------------------------
+        // ---- Phase 1: Probing ----
         var grandTotal = primaryTotal
-        runProbePhase(primaryTasks, primaryTotal, probeDispatcher, prober, cfg, healthy, foundCount, latencyTrace, ::elapsed, usingFallback = false)
+        runProbePhase(primaryTasks, primaryTotal, probeDispatcher, prober, cfg, healthy, foundCount, latencyTrace, ::elapsed, false, ::log, ::snapshotLogs)
 
-        // ---- Phase 1b: open-site fallback ----------------------------------
-        // Nothing healthy from the range scan? Resolve known Cloudflare-fronted
-        // domains and probe their edge IPs — those are addresses the network is
-        // demonstrably letting through for sites that still load.
+        // ---- Phase 1b: Fallback ----
         var usingFallback = false
         if (healthy.isEmpty() && cfg.fallbackToDomains && cfg.fallbackDomains.isNotEmpty()) {
-            send(ScanProgress(phase = ScanPhase.RESOLVING, elapsedMs = elapsed(), usingFallback = true, latencyTrace = snapshotTrace(latencyTrace)))
+            log("No results in range scan. Attempting open-site fallback...")
+            send(ScanProgress(phase = ScanPhase.RESOLVING, elapsedMs = elapsed(), usingFallback = true, latencyTrace = snapshotTrace(latencyTrace), logs = snapshotLogs()))
             val fbHosts = runCatching {
-                DomainResolver.resolveHosts(
-                    domains = cfg.fallbackDomains,
-                    useV4 = cfg.useV4,
-                    useV6 = cfg.useV6,
-                    limit = 400,
-                )
+                DomainResolver.resolveHosts(cfg.fallbackDomains, cfg.useV4, cfg.useV6, limit = 400)
             }.getOrDefault(emptyList())
             if (fbHosts.isNotEmpty()) {
                 usingFallback = true
-                // Probe each domain-derived edge with that domain as its SNI.
                 val fbTasks = ArrayList<ProbeTask>(fbHosts.size * ports.size)
                 for (h in fbHosts) for (port in ports) fbTasks.add(ProbeTask(h.ip, port, h.domain))
                 grandTotal += fbTasks.size
-                runProbePhase(fbTasks.iterator(), fbTasks.size, probeDispatcher, prober, cfg, healthy, foundCount, latencyTrace, ::elapsed, usingFallback = true)
+                log("Phase 1b: Probing ${fbTasks.size} domain-derived edges")
+                runProbePhase(fbTasks.iterator(), fbTasks.size, probeDispatcher, prober, cfg, healthy, foundCount, latencyTrace, ::elapsed, true, ::log, ::snapshotLogs)
             }
         }
 
-        val phase1Best = snapshotBest(healthy, cfg.top)
-
-        // ---- Phase 2: validate throughput of the best candidates -----------
-        if (!cfg.speedTest || phase1Best.isEmpty()) {
-            send(
-                ScanProgress(
-                    phase = ScanPhase.DONE,
-                    tested = grandTotal, total = grandTotal,
-                    found = foundCount.get(),
-                    elapsedMs = elapsed(),
-                    best = phase1Best,
-                    usingFallback = usingFallback,
-                )
-            )
+        var results = snapshotBest(healthy, cfg.top)
+        if (results.isEmpty()) {
+            log("Scan finished: 0 healthy targets found.")
+            send(ScanProgress(phase = ScanPhase.DONE, tested = grandTotal, total = grandTotal, elapsedMs = elapsed(), logs = snapshotLogs()))
             return@channelFlow
         }
 
+        // ---- Phase 1.5: Stability Re-check (Simorgh Style) ----
+        log("Phase 1.5: Re-checking stability for top ${results.size} candidates")
+        val stabilityCount = 6 // Increased for better detection of "Ghost IPs"
+        val stableResults = Collections.synchronizedList(ArrayList<ScanResult>())
+        val sDone = AtomicInteger(0)
+        val sTotal = results.size
+        
+        send(ScanProgress(
+            phase = ScanPhase.STABILITY, tested = grandTotal, total = grandTotal,
+            found = foundCount.get(), validated = 0, validateTotal = sTotal,
+            elapsedMs = elapsed(), best = results, usingFallback = usingFallback, logs = snapshotLogs()
+        ))
+
+        coroutineScope {
+            results.forEach { r ->
+                launch(Dispatchers.IO) {
+                    var success = 0
+                    val samples = ArrayList<Long>()
+                    repeat(stabilityCount) {
+                        val check = prober.probe(r.ip, r.port, if (usingFallback) r.ip else null)
+                        if (check.healthy) {
+                            success++
+                            samples.addAll(check.latenciesMs)
+                        }
+                        // Variable delay to catch rate-limiting/DPI behaviors
+                        kotlinx.coroutines.delay(50L + java.util.Random().nextInt(100))
+                    }
+                    val passRate = success.toDouble() / stabilityCount
+                    stableResults.add(r.copy(passRate = passRate, latenciesMs = samples))
+                    val d = sDone.incrementAndGet()
+                    val current = synchronized(stableResults) { 
+                        ArrayList(stableResults).sortedWith(
+                            compareByDescending<ScanResult> { it.passRate }
+                                .thenBy { it.jitterMs } // Prioritize low jitter for stability
+                                .thenBy { it.avgLatencyMs }
+                        )
+                    }
+                    send(ScanProgress(
+                        phase = ScanPhase.STABILITY, tested = grandTotal, total = grandTotal,
+                        found = foundCount.get(), validated = d, validateTotal = sTotal,
+                        elapsedMs = elapsed(), best = current, usingFallback = usingFallback, logs = snapshotLogs()
+                    ))
+                }
+            }
+        }
+        results = synchronized(stableResults) { 
+            ArrayList(stableResults).filter { it.passRate > 0 }.sortedWith(compareByDescending<ScanResult> { it.passRate }.thenBy { it.avgLatencyMs }).take(cfg.top) 
+        }
+        log("Stability check complete. ${results.size} survivors.")
+
+        // ---- Phase 2: Speed Test ----
+        if (!cfg.speedTest || results.isEmpty()) {
+            log("Scan finished. Results: ${results.size}")
+            send(ScanProgress(phase = ScanPhase.DONE, tested = grandTotal, total = grandTotal, found = foundCount.get(), elapsedMs = elapsed(), best = results, usingFallback = usingFallback, logs = snapshotLogs()))
+            return@channelFlow
+        }
+
+        log("Phase 2: Running throughput validation on top ${results.size} survivors")
         val validated = Collections.synchronizedList(ArrayList<ScanResult>())
         val vDone = AtomicInteger(0)
         val vIdx = AtomicInteger(0)
-        val vTotal = phase1Best.size
-        send(
-            ScanProgress(
-                phase = ScanPhase.VALIDATING,
-                tested = grandTotal, total = grandTotal,
-                found = foundCount.get(),
-                validated = 0, validateTotal = vTotal,
-                elapsedMs = elapsed(), best = phase1Best,
-                usingFallback = usingFallback,
-            )
-        )
+        val vTotal = results.size
+        
+        send(ScanProgress(phase = ScanPhase.VALIDATING, tested = grandTotal, total = grandTotal, found = foundCount.get(), validated = 0, validateTotal = vTotal, elapsedMs = elapsed(), best = results, usingFallback = usingFallback, logs = snapshotLogs()))
 
         coroutineScope {
             val vConcurrency = 4.coerceAtMost(vTotal).coerceAtLeast(1)
-            val workers = (0 until vConcurrency).map {
+            (0 until vConcurrency).map {
                 launch(Dispatchers.IO) {
                     while (isActive) {
                         val i = vIdx.getAndIncrement()
                         if (i >= vTotal) break
-                        val enriched = validator.validate(phase1Best[i], proxy, cfg)
+                        val r = results[i]
+                        log("Testing throughput: ${r.ip}...")
+                        val enriched = validator.validate(r, proxy, cfg)
                         validated.add(enriched)
                         val d = vDone.incrementAndGet()
-                        val best = synchronized(validated) {
-                            ResultSort.bySpeed(ArrayList(validated))
-                        }
-                        send(
-                            ScanProgress(
-                                phase = ScanPhase.VALIDATING,
-                                tested = grandTotal, total = grandTotal,
-                                found = foundCount.get(),
-                                validated = d, validateTotal = vTotal,
-                                elapsedMs = elapsed(), best = best,
-                                usingFallback = usingFallback,
-                            )
-                        )
+                        val current = synchronized(validated) { ResultSort.bySpeed(ArrayList(validated)) }
+                        send(ScanProgress(phase = ScanPhase.VALIDATING, tested = grandTotal, total = grandTotal, found = foundCount.get(), validated = d, validateTotal = vTotal, elapsedMs = elapsed(), best = current, usingFallback = usingFallback, logs = snapshotLogs()))
                     }
                 }
-            }
-            workers.joinAll()
+            }.joinAll()
         }
 
         val finalBest = synchronized(validated) { ResultSort.bySpeed(ArrayList(validated)) }
-        send(
-            ScanProgress(
-                phase = ScanPhase.DONE,
-                tested = grandTotal, total = grandTotal,
-                found = foundCount.get(),
-                validated = vDone.get(), validateTotal = vTotal,
-                elapsedMs = elapsed(),
-                best = finalBest,
-                usingFallback = usingFallback,
-            )
-        )
+        log("Scan complete. Best speed: ${String.format(java.util.Locale.US, "%.2f", finalBest.firstOrNull()?.throughputMbps ?: 0.0)} Mbps")
+        send(ScanProgress(phase = ScanPhase.DONE, tested = grandTotal, total = grandTotal, found = foundCount.get(), validated = vDone.get(), validateTotal = vTotal, elapsedMs = elapsed(), best = finalBest, usingFallback = usingFallback, logs = snapshotLogs()))
     }
 
     private companion object {
-        /** Max samples kept in the live oscilloscope window. */
         const val TRACE_CAP = 72
     }
 
-    /** One probe unit: an endpoint plus an optional SNI to pin (null = rotate). */
     private data class ProbeTask(val ip: String, val port: Int, val sni: String? = null)
 
-    /** Lazily expand candidate IPs × ports into a flat probe-task iterator. */
     private fun tasksFor(ips: Sequence<String>, ports: List<Int>): Iterator<ProbeTask> =
         ips.flatMap { ip -> ports.asSequence().map { ProbeTask(ip, it) } }.iterator()
 
     private fun snapshotBest(healthy: List<ScanResult>, top: Int): List<ScanResult> =
         synchronized(healthy) { ResultSort.topByLatency(ArrayList(healthy), top) }
 
-    /** Defensive copy of the rolling latency trace for a progress snapshot. */
     private fun snapshotTrace(trace: List<Int>): List<Int> =
         synchronized(trace) { ArrayList(trace) }
 
-    /**
-     * Push one probe's latency onto the bounded oscilloscope trace. Responding
-     * probes contribute their average latency (ms, floored at 1); a miss/timeout
-     * is recorded as 0 so the UI can draw it as a dropout spike.
-     */
     private fun recordSample(trace: MutableList<Int>, r: ScanResult) {
         val v = if (r.latenciesMs.isNotEmpty()) r.avgLatencyMs.toInt().coerceAtLeast(1) else 0
         synchronized(trace) {
@@ -221,12 +223,6 @@ class ScanEngine(
         }
     }
 
-    /**
-     * Run one Phase-1 probing pass over [tasks], appending healthy hits to the
-     * shared [healthy] list and emitting throttled [ScanProgress] snapshots.
-     * Used twice: once for the primary candidates, once for the open-site
-     * fallback (distinguished by [usingFallback]).
-     */
     private suspend fun ProducerScope<ScanProgress>.runProbePhase(
         taskIter: Iterator<ProbeTask>,
         total: Int,
@@ -238,68 +234,47 @@ class ScanEngine(
         latencyTrace: MutableList<Int>,
         elapsed: () -> Long,
         usingFallback: Boolean,
+        log: (String) -> Unit,
+        snapshotLogs: () -> List<String>
     ) {
         if (total == 0) return
         val tested = AtomicInteger(0)
         val lastEmit = java.util.concurrent.atomic.AtomicLong(0)
         val stopEarly = java.util.concurrent.atomic.AtomicBoolean(false)
-
-        // Smart-stop target: once we have comfortably more than we need, there's
-        // no point probing thousands more IPs. Scales with the user's "keep best".
-        // Skip smart-stop if we are scanning a fixed list of IPs (Test mode).
         val earlyTarget = maxOf(cfg.top * 4, 30)
         val canStopEarly = cfg.smartStop && cfg.explicitIps.isEmpty()
 
-        send(
-            ScanProgress(
-                phase = ScanPhase.PROBING, total = total,
-                found = foundCount.get(), elapsedMs = elapsed(),
-                best = snapshotBest(healthy, cfg.top), usingFallback = usingFallback,
-                latencyTrace = snapshotTrace(latencyTrace),
-            )
-        )
-
         coroutineScope {
-            val workers = (0 until cfg.concurrency.coerceAtLeast(1)).map {
+            (0 until cfg.concurrency.coerceAtLeast(1)).map {
                 launch(dispatcher) {
                     while (isActive && !stopEarly.get()) {
-                        // Pull the next task from the shared lazy iterator. The IP
-                        // generator/iterator isn't thread-safe, so guard the step.
-                        val task = synchronized(taskIter) {
-                            if (taskIter.hasNext()) taskIter.next() else null
-                        } ?: break
+                        val task = synchronized(taskIter) { if (taskIter.hasNext()) taskIter.next() else null } ?: break
                         val r = prober.probe(task.ip, task.port, task.sni)
                         val t = tested.incrementAndGet()
                         recordSample(latencyTrace, r)
                         if (r.healthy) {
                             healthy.add(r)
                             val f = foundCount.incrementAndGet()
-                            if (canStopEarly && f >= earlyTarget) stopEarly.set(true)
+                            if (canStopEarly && f >= earlyTarget) {
+                                log("Found $f healthy IPs. Smart-stopping primary phase.")
+                                stopEarly.set(true)
+                            }
                         }
-                        // Throttle UI emissions to ~10/sec to keep recomposition cheap,
-                        // but always emit the final probe and stop-triggering events.
                         val now = System.currentTimeMillis()
                         val last = lastEmit.get()
-                        val due = now - last >= 100
-                        if (due || t == total || stopEarly.get()) {
+                        if (now - last >= 100 || t == total || stopEarly.get()) {
                             if (lastEmit.compareAndSet(last, now) || t == total || stopEarly.get()) {
-                                send(
-                                    ScanProgress(
-                                        phase = ScanPhase.PROBING,
-                                        tested = t, total = total,
-                                        found = foundCount.get(),
-                                        elapsedMs = elapsed(),
-                                        best = snapshotBest(healthy, cfg.top),
-                                        usingFallback = usingFallback,
-                                        latencyTrace = snapshotTrace(latencyTrace),
-                                    )
-                                )
+                                send(ScanProgress(
+                                    phase = ScanPhase.PROBING, tested = t, total = total, found = foundCount.get(),
+                                    elapsedMs = elapsed(), best = snapshotBest(healthy, cfg.top),
+                                    usingFallback = usingFallback, latencyTrace = snapshotTrace(latencyTrace),
+                                    logs = snapshotLogs()
+                                ))
                             }
                         }
                     }
                 }
-            }
-            workers.joinAll()
+            }.joinAll()
         }
     }
 }
