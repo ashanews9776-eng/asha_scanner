@@ -27,6 +27,7 @@ import com.ahoura.asha_scanner_ip.ui.i18n.Lang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
 import com.ahoura.asha_scanner_ip.ui.i18n.stringsFor
+import com.ahoura.asha_scanner_ip.ui.theme.Asha_scanner_ipTheme
 import com.ahoura.asha_scanner_ip.ui.screens.AboutScreen
 import com.ahoura.asha_scanner_ip.ui.screens.CustomScanScreen
 import com.ahoura.asha_scanner_ip.ui.screens.DiscoverScreen
@@ -65,65 +66,67 @@ fun AshaApp(vm: ScanViewModel) {
         LocalLang provides lang,
         LocalStrings provides stringsFor(lang),
     ) {
-        CyberBackground(animated = animatedBg) {
-            Scaffold(modifier = Modifier.fillMaxSize(), containerColor = Color.Transparent) { inner ->
-                Box(Modifier.fillMaxSize().padding(inner)) {
-                    AnimatedContent(
-                        targetState = current,
-                        transitionSpec = {
-                            (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 20 })
-                                .togetherWith(fadeOut(tween(160)))
-                        },
-                        label = "route",
-                    ) { route ->
-                        when (route) {
-                            Route.HOME -> HomeScreen(
-                                vm = vm,
-                                onQuick = { push(Route.QUICK) },
-                                onCustom = { push(Route.CUSTOM) },
-                                onTest = { push(Route.TEST) },
-                                onDiscover = { vm.prepareDiscover(); push(Route.DISCOVER) },
-                                onAbout = { push(Route.ABOUT) },
-                                onToggleLang = { vm.toggleLanguage() },
-                            )
-                            Route.QUICK -> QuickScanScreen(
-                                vm = vm, onBack = ::back,
-                                onStart = { vm.start(); replaceTop(Route.LIVE) },
-                            )
-                            Route.CUSTOM -> CustomScanScreen(
-                                vm = vm, onBack = ::back,
-                                onStart = { vm.start(); replaceTop(Route.LIVE) },
-                            )
-                            Route.TEST -> TestIpsScreen(
-                                vm = vm, onBack = ::back,
-                                onStart = { vm.start(); replaceTop(Route.LIVE) },
-                            )
-                            Route.DISCOVER -> DiscoverScreen(
-                                vm = vm, onBack = ::back,
-                                onStart = { vm.start(); replaceTop(Route.LIVE) },
-                            )
-                            Route.LIVE -> ScanLiveScreen(
-                                vm = vm,
-                                onCancel = { vm.stop() },
-                                onFinished = { replaceTop(Route.RESULTS) },
-                            )
-                            Route.RESULTS -> ResultsScreen(
-                                vm = vm,
-                                onAgain = { vm.reset(); home() },
-                                onBack = { vm.reset(); home() },
-                            )
-                            Route.ABOUT -> AboutScreen(onBack = ::back)
+        Asha_scanner_ipTheme(lang = lang) {
+            CyberBackground(animated = animatedBg) {
+                Scaffold(modifier = Modifier.fillMaxSize(), containerColor = Color.Transparent) { inner ->
+                    Box(Modifier.fillMaxSize().padding(inner)) {
+                        AnimatedContent(
+                            targetState = current,
+                            transitionSpec = {
+                                (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 20 })
+                                    .togetherWith(fadeOut(tween(160)))
+                            },
+                            label = "route",
+                        ) { route ->
+                            when (route) {
+                                Route.HOME -> HomeScreen(
+                                    vm = vm,
+                                    onQuick = { push(Route.QUICK) },
+                                    onCustom = { push(Route.CUSTOM) },
+                                    onTest = { push(Route.TEST) },
+                                    onDiscover = { vm.prepareDiscover(); push(Route.DISCOVER) },
+                                    onAbout = { push(Route.ABOUT) },
+                                    onToggleLang = { vm.toggleLanguage() },
+                                )
+                                Route.QUICK -> QuickScanScreen(
+                                    vm = vm, onBack = ::back,
+                                    onStart = { vm.start(); replaceTop(Route.LIVE) },
+                                )
+                                Route.CUSTOM -> CustomScanScreen(
+                                    vm = vm, onBack = ::back,
+                                    onStart = { vm.start(); replaceTop(Route.LIVE) },
+                                )
+                                Route.TEST -> TestIpsScreen(
+                                    vm = vm, onBack = ::back,
+                                    onStart = { vm.start(); replaceTop(Route.LIVE) },
+                                )
+                                Route.DISCOVER -> DiscoverScreen(
+                                    vm = vm, onBack = ::back,
+                                    onStart = { vm.start(); replaceTop(Route.LIVE) },
+                                )
+                                Route.LIVE -> ScanLiveScreen(
+                                    vm = vm,
+                                    onCancel = { vm.stop() },
+                                    onFinished = { replaceTop(Route.RESULTS) },
+                                )
+                                Route.RESULTS -> ResultsScreen(
+                                    vm = vm,
+                                    onAgain = { vm.reset(); home() },
+                                    onBack = { vm.reset(); home() },
+                                )
+                                Route.ABOUT -> AboutScreen(onBack = ::back)
+                            }
                         }
-                    }
 
-                    // Show update dialog if available
-                    state.updateInfo?.let { info ->
-                        UpdateDialog(
-                            version = info.version,
-                            url = info.url,
-                            changelog = info.changelog,
-                            onDismiss = { vm.dismissUpdate() }
-                        )
+                        // Show update dialog if available
+                        state.updateInfo?.let { info ->
+                            UpdateDialog(
+                                version = info.version,
+                                url = info.url,
+                                changelog = info.changelog,
+                                onDismiss = { vm.dismissUpdate() }
+                            )
+                        }
                     }
                 }
             }

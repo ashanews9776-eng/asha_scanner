@@ -113,7 +113,7 @@ class ScanEngine(
 
         // ---- Phase 1.5: Stability Re-check (Simorgh Style) ----
         log("Phase 1.5: Re-checking stability for top ${results.size} candidates")
-        val stabilityCount = 6 // Increased for better detection of "Ghost IPs"
+        val stabilityCount = cfg.stabilityCount 
         val stableResults = Collections.synchronizedList(ArrayList<ScanResult>())
         val sDone = AtomicInteger(0)
         val sTotal = results.size

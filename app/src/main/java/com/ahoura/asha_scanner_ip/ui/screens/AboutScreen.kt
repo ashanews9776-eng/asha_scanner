@@ -44,6 +44,8 @@ import com.ahoura.asha_scanner_ip.ui.theme.TextMutedC
 import com.ahoura.asha_scanner_ip.ui.theme.TextPrimaryC
 import com.ahoura.asha_scanner_ip.ui.theme.TextSecondaryC
 import com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn
+import com.ahoura.asha_scanner_ip.ui.theme.displayFamily
+import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
@@ -61,7 +63,7 @@ fun AboutScreen(onBack: () -> Unit) {
             Text(
                 s.aboutBlurb,
                 color = TextSecondaryC,
-                fontFamily = if (lang == Lang.FA) Vazirmatn else ShareTechMono,
+                fontFamily = monoFamily(lang),
                 fontSize = 12.sp, lineHeight = if (lang == Lang.FA) 20.sp else 18.sp,
             )
 
@@ -72,7 +74,7 @@ fun AboutScreen(onBack: () -> Unit) {
                     Text(
                         if (lang == Lang.FA) s.license else "LICENSE",
                         color = TextMutedC,
-                        fontFamily = if (lang == Lang.FA) Vazirmatn else ShareTechMono,
+                        fontFamily = monoFamily(lang),
                         fontSize = if (lang == Lang.FA) 10.sp else 8.sp,
                         letterSpacing = if (lang == Lang.FA) 0.sp else 1.5.sp,
                     )
@@ -99,12 +101,12 @@ private fun LinkRow(icon: ImageVector, color: Color, label: String, value: Strin
             Text(
                 if (lang == Lang.FA) label else label.uppercase(),
                 color = TextMutedC,
-                fontFamily = if (lang == Lang.FA) Vazirmatn else ShareTechMono,
+                fontFamily = monoFamily(lang),
                 fontSize = if (lang == Lang.FA) 10.sp else 8.sp,
                 letterSpacing = if (lang == Lang.FA) 0.sp else 1.5.sp,
             )
             Text(value, color = color, fontFamily = ShareTechMono, fontSize = 12.sp)
         }
-        Text("→", color = color, fontFamily = Rajdhani, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        Text("→", color = color, fontFamily = displayFamily(lang), fontWeight = FontWeight.Bold, fontSize = 14.sp)
     }
 }

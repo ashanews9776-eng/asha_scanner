@@ -17,9 +17,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            Asha_scanner_ipTheme {
-                AshaApp(viewModel)
-            }
+            AshaApp(viewModel)
         }
     }
 }

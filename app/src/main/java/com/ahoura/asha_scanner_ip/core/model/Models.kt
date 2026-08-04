@@ -29,6 +29,16 @@ enum class Protocol(val scheme: String) {
     }
 }
 
+/** Predefined scan profiles mirroring Aether-GUI's tiers. */
+enum class ScanTier {
+    TURBO,     // Fastest discovery, TCP only
+    BALANCED,  // The middle ground
+    THOROUGH,  // Deep handshake, more samples
+    STEALTH,   // Slow and careful to avoid DPI
+    IRONCLAD,  // Full HTTP verification + high stability check
+    CUSTOM     // Manual tweaks
+}
+
 /**
  * A parsed VLESS / Trojan link. Mirrors the fields extracted by the original
  * xraytest parser so a Phase-2 validator (pure-Kotlin or xray-core) has
@@ -63,6 +73,7 @@ data class ProxyConfig(
 
 /** User-tunable scan parameters. Defaults mirror SenPaiScanner's ScanDefaults. */
 data class ScanConfig(
+    val tier: ScanTier = ScanTier.BALANCED,
     val count: Int = 500,
     val concurrency: Int = 50,
     val timeoutMs: Long = 5_000,
@@ -72,6 +83,7 @@ data class ScanConfig(
     val useV4: Boolean = true,
     val useV6: Boolean = false,
     val top: Int = 10,
+    val stabilityCount: Int = 4,      // Number of re-checks in Phase 1.5
     val speedTest: Boolean = true,   // run Phase-2 throughput validation on the top results
     val smartStop: Boolean = true,   // stop Phase-1 early once plenty of healthy IPs are found
     val fragment: Boolean = false,   // attempt TLS fragmentation to dodge DPI

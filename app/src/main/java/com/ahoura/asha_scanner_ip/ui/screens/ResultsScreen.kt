@@ -72,6 +72,8 @@ import com.ahoura.asha_scanner_ip.ui.theme.TextFadedC
 import com.ahoura.asha_scanner_ip.ui.theme.TextMutedC
 import com.ahoura.asha_scanner_ip.ui.theme.TextPrimaryC
 import com.ahoura.asha_scanner_ip.ui.theme.TextSecondaryC
+import com.ahoura.asha_scanner_ip.ui.theme.displayFamily
+import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 
 @Composable
 fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
@@ -120,13 +122,12 @@ fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
             )
             Column(Modifier.padding(horizontal = 12.dp)) {
                 // ---- Header numbers ----
-                val labelFont = if (lang == Lang.FA) com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn else ShareTechMono
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
                     Column(Modifier.weight(1f)) {
                         Text("${state.progress.found}".localizeDigits(lang), color = Accent, fontFamily = ShareTechMono, fontSize = 32.sp)
                         Text(
                             s.healthyIpsTopShown.format(results.size).localizeDigits(lang),
-                            color = TextSecondaryC, fontFamily = labelFont, fontSize = if (lang == Lang.FA) 10.sp else 9.sp,
+                            color = TextSecondaryC, fontFamily = displayFamily(lang), fontSize = if (lang == Lang.FA) 10.sp else 9.sp,
                             letterSpacing = if (lang == Lang.FA) 0.sp else 1.sp,
                         )
                     }
@@ -136,7 +137,7 @@ fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
                         Text(if (bestMs > 0) "$bestMs".localizeDigits(lang) else "—", color = BlueC, fontFamily = ShareTechMono, fontSize = 22.sp)
                         Text(
                             if (lang == Lang.FA) s.bestMs else s.bestMs.uppercase(),
-                            color = TextMutedC, fontFamily = labelFont, fontSize = if (lang == Lang.FA) 10.sp else 9.sp,
+                            color = TextMutedC, fontFamily = monoFamily(lang), fontSize = if (lang == Lang.FA) 10.sp else 9.sp,
                             letterSpacing = if (lang == Lang.FA) 0.sp else 1.sp,
                         )
                     }
@@ -160,9 +161,9 @@ fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
                             }.padding(12.dp)
                     ) {
                         Column {
-                            Text(s.localSub, color = Accent, fontFamily = labelFont, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text(s.localSub, color = Accent, fontFamily = monoFamily(lang), fontWeight = FontWeight.Bold, fontSize = 11.sp)
                             Text(url, color = TextPrimaryC, fontFamily = ShareTechMono, fontSize = 12.sp)
-                            Text(s.localSubDesc, color = TextMutedC, fontFamily = labelFont, fontSize = 9.sp)
+                            Text(s.localSubDesc, color = TextMutedC, fontFamily = monoFamily(lang), fontSize = 9.sp)
                         }
                     }
                     Spacer8()
@@ -397,7 +398,6 @@ private fun latency(ms: Int): Color = when {
 private fun GradeLegend() {
     val s = LocalStrings.current
     val lang = LocalLang.current
-    val labelFont = if (lang == Lang.FA) com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn else ShareTechMono
     val grades = listOf(
         QualityGrade.S to s.gradeS,
         QualityGrade.A to s.gradeA,
@@ -413,7 +413,7 @@ private fun GradeLegend() {
             .padding(10.dp)
     ) {
         Text(
-            s.gradeLegend, color = Accent, fontFamily = labelFont,
+            s.gradeLegend, color = Accent, fontFamily = displayFamily(lang),
             fontWeight = FontWeight.Bold, fontSize = 10.sp,
             letterSpacing = if (lang == Lang.FA) 0.sp else 1.sp
         )
@@ -432,7 +432,7 @@ private fun GradeLegend() {
                 Box(Modifier.size(10.dp))
                 Text(
                     desc, color = TextSecondaryC, fontSize = 11.sp,
-                    fontFamily = if (lang == Lang.FA) com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn else ShareTechMono,
+                    fontFamily = monoFamily(lang),
                     lineHeight = 14.sp
                 )
             }
@@ -464,7 +464,7 @@ private fun GradeLegend() {
                 Box(Modifier.size(10.dp))
                 Text(
                     desc, color = TextSecondaryC, fontSize = 11.sp,
-                    fontFamily = if (lang == Lang.FA) com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn else ShareTechMono,
+                    fontFamily = monoFamily(lang),
                     lineHeight = 14.sp
                 )
             }

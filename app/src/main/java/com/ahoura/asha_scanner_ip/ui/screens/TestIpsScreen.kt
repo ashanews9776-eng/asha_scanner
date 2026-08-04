@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ahoura.asha_scanner_ip.core.model.ProbeMode
 import com.ahoura.asha_scanner_ip.ui.ScanViewModel
+import com.ahoura.asha_scanner_ip.ui.i18n.Lang
+import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
 import com.ahoura.asha_scanner_ip.ui.components.CyberAppBar
 import com.ahoura.asha_scanner_ip.ui.components.CyberCard
@@ -46,6 +48,7 @@ import com.ahoura.asha_scanner_ip.ui.components.ScanButton
 import com.ahoura.asha_scanner_ip.ui.components.SectionLabel
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
 import com.ahoura.asha_scanner_ip.ui.theme.ShareTechMono
+import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 import com.ahoura.asha_scanner_ip.ui.theme.TextMutedC
 
 @Composable
@@ -54,6 +57,7 @@ fun TestIpsScreen(vm: ScanViewModel, onBack: () -> Unit, onStart: () -> Unit) {
     val context = LocalContext.current
     val count = state.scanConfig.explicitIps.size
     val s = LocalStrings.current
+    val lang = LocalLang.current
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
@@ -120,7 +124,7 @@ fun TestIpsScreen(vm: ScanViewModel, onBack: () -> Unit, onStart: () -> Unit) {
             }
         }
         Column(Modifier.padding(12.dp)) {
-            ScanButton(text = "▶  ${s.startTest}", icon = Icons.Filled.PlayArrow, enabled = count > 0) {
+            ScanButton(text = "▶  ${s.startTest}", icon = Icons.Filled.PlayArrow, active = count > 0) {
                 vm.updateScanConfig {
                     it.copy(tries = 6, timeoutMs = 10_000, concurrency = 20, speedTest = true, top = 50, smartStop = false)
                 }

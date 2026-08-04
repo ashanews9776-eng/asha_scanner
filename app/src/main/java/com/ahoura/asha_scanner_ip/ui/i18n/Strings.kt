@@ -88,6 +88,19 @@ data class AppStrings(
     val gamingDesc: String,
     val streamingDesc: String,
     val stabilityDesc: String,
+    // Tiers
+    val tierTurbo: String,
+    val tierTurboDesc: String,
+    val tierBalanced: String,
+    val tierBalancedDesc: String,
+    val tierThorough: String,
+    val tierThoroughDesc: String,
+    val tierStealth: String,
+    val tierStealthDesc: String,
+    val tierIronclad: String,
+    val tierIroncladDesc: String,
+    val tierCustom: String,
+    val tierCustomDesc: String,
     // Results
     val results: String,
     val healthyIpsTopShown: String,
@@ -219,6 +232,18 @@ private val EN = AppStrings(
     gamingDesc = "Low jitter & 0% packet loss",
     streamingDesc = "High bandwidth (15Mbps+)",
     stabilityDesc = "Reliable for long sessions",
+    tierTurbo = "TURBO",
+    tierTurboDesc = "Fastest discovery, TCP only",
+    tierBalanced = "BALANCED",
+    tierBalancedDesc = "Default optimized profile",
+    tierThorough = "THOROUGH",
+    tierThoroughDesc = "Deeper TLS verification",
+    tierStealth = "STEALTH",
+    tierStealthDesc = "Slow and careful for strict DPI",
+    tierIronclad = "IRONCLAD",
+    tierIroncladDesc = "Maximum reliability, full HTTP",
+    tierCustom = "CUSTOM",
+    tierCustomDesc = "Manual adjustments",
 )
 
 private val FA = AppStrings(
@@ -321,6 +346,18 @@ private val FA = AppStrings(
     gamingDesc = "پینگ پایدار و بدون پکت‌لاس",
     streamingDesc = "پهنای باند بالا (بیش از ۱۵Mbps)",
     stabilityDesc = "مناسب برای اتصال طولانی‌مدت",
+    tierTurbo = "توربو",
+    tierTurboDesc = "سریع‌ترین حالت، بررسی TCP",
+    tierBalanced = "متعادل",
+    tierBalancedDesc = "پروفایل بهینه پیش‌فرض",
+    tierThorough = "دقیق",
+    tierThoroughDesc = "بررسی عمیق TLS",
+    tierStealth = "نامرئی",
+    tierStealthDesc = "آهسته و محتاط برای فیلترینگ شدید",
+    tierIronclad = "آهنین",
+    tierIroncladDesc = "بیشترین پایداری، بررسی کامل HTTP",
+    tierCustom = "سفارشی",
+    tierCustomDesc = "تنظیمات دستی",
 )
 
 fun stringsFor(lang: Lang): AppStrings = if (lang == Lang.FA) FA else EN

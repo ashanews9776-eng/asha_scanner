@@ -92,6 +92,7 @@ fun KvInput(
     keyboardType: KeyboardType = KeyboardType.Text,
     modifier: Modifier = Modifier,
 ) {
+    val lang = LocalLang.current
     Row(
         modifier.fillMaxWidth().height(36.dp).clip(RoundedCornerShape(5.dp))
             .background(SurfaceC).border(0.5.dp, BorderC, RoundedCornerShape(5.dp))
@@ -99,8 +100,8 @@ fun KvInput(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            label.uppercase(), color = TextMutedC, fontFamily = ShareTechMono,
-            fontSize = 9.sp, letterSpacing = 1.sp, modifier = Modifier.width(64.dp),
+            if (lang == Lang.FA) label else label.uppercase(), color = TextMutedC, fontFamily = com.ahoura.asha_scanner_ip.ui.theme.monoFamily(lang),
+            fontSize = if (lang == Lang.FA) 10.sp else 9.sp, letterSpacing = if (lang == Lang.FA) 0.sp else 1.sp, modifier = Modifier.width(64.dp),
         )
         BasicTextField(
             value = value,
@@ -138,7 +139,7 @@ fun ModeSegment(options: List<String>, selectedIndex: Int, onSelect: (Int) -> Un
             ) {
                 Text(
                     label, color = if (sel) Accent else TextSecondaryC,
-                    fontFamily = ShareTechMono, fontSize = 11.sp,
+                    fontFamily = com.ahoura.asha_scanner_ip.ui.theme.monoFamily(LocalLang.current), fontSize = 11.sp,
                 )
             }
         }

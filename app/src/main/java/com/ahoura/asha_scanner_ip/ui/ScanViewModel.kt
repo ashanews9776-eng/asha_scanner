@@ -237,6 +237,39 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(scanConfig = transform(it.scanConfig)) }
     }
 
+    fun setTier(tier: com.ahoura.asha_scanner_ip.core.model.ScanTier) {
+        if (tier == com.ahoura.asha_scanner_ip.core.model.ScanTier.CUSTOM) {
+            updateScanConfig { it.copy(tier = tier) }
+            return
+        }
+        updateScanConfig {
+            when (tier) {
+                com.ahoura.asha_scanner_ip.core.model.ScanTier.TURBO -> it.copy(
+                    tier = tier, count = 1000, concurrency = 128, timeoutMs = 3000,
+                    mode = com.ahoura.asha_scanner_ip.core.model.ProbeMode.TCP, speedTest = false
+                )
+                com.ahoura.asha_scanner_ip.core.model.ScanTier.BALANCED -> it.copy(
+                    tier = tier, count = 500, concurrency = 64, timeoutMs = 5000,
+                    mode = com.ahoura.asha_scanner_ip.core.model.ProbeMode.HTTP, speedTest = true
+                )
+                com.ahoura.asha_scanner_ip.core.model.ScanTier.THOROUGH -> it.copy(
+                    tier = tier, count = 1500, concurrency = 96, timeoutMs = 7000,
+                    mode = com.ahoura.asha_scanner_ip.core.model.ProbeMode.HTTP, speedTest = true
+                )
+                com.ahoura.asha_scanner_ip.core.model.ScanTier.STEALTH -> it.copy(
+                    tier = tier, count = 300, concurrency = 20, timeoutMs = 10000,
+                    mode = com.ahoura.asha_scanner_ip.core.model.ProbeMode.TLS, speedTest = true
+                )
+                com.ahoura.asha_scanner_ip.core.model.ScanTier.IRONCLAD -> it.copy(
+                    tier = tier, count = 2000, concurrency = 128, timeoutMs = 15000,
+                    mode = com.ahoura.asha_scanner_ip.core.model.ProbeMode.HTTP, speedTest = true,
+                    top = 20, stabilityCount = 10
+                )
+                else -> it
+            }
+        }
+    }
+
     fun setSortKey(key: SortKey) {
         _state.update { it.copy(sortKey = key) }
     }

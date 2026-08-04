@@ -66,6 +66,7 @@ import com.ahoura.asha_scanner_ip.ui.components.ColoBadge
 import com.ahoura.asha_scanner_ip.ui.components.LottieSonar
 import com.ahoura.asha_scanner_ip.ui.components.RadarSweep
 import com.ahoura.asha_scanner_ip.ui.components.NeonProgressBar
+import com.ahoura.asha_scanner_ip.ui.components.SectionLabel
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
 import com.ahoura.asha_scanner_ip.ui.theme.AccentDim
 import com.ahoura.asha_scanner_ip.ui.theme.BlueC
@@ -94,6 +95,7 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
     val lang = LocalLang.current
     val fa = lang == Lang.FA
     var sortTab by remember { mutableIntStateOf(0) }
+    var showGuide by remember { mutableStateOf(false) }
 
     val validating = p.phase == ScanPhase.VALIDATING
     val resolving = p.phase == ScanPhase.RESOLVING
@@ -228,7 +230,7 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
                 ) {
                     Text(
                         if (fa) s.radar else s.radar.uppercase(),
-                        color = scopeColor, fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                        color = scopeColor, fontFamily = displayFamily(lang),
                         fontSize = if (fa) 10.sp else 9.sp, letterSpacing = if (fa) 0.sp else 1.5.sp,
                     )
                     Text(
@@ -239,7 +241,7 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
                 // Healthy count anchored bottom-start.
                 Text(
                     "▲ ${"${p.found}".localizeDigits(lang)} ${if (fa) s.healthy else s.healthy.uppercase()}",
-                    color = AccentDim, fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                    color = AccentDim, fontFamily = displayFamily(lang),
                     fontSize = if (fa) 9.sp else 8.sp, letterSpacing = if (fa) 0.sp else 1.sp,
                     modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = 10.dp, vertical = 6.dp),
                 )
@@ -336,6 +338,44 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
         if (detail != null) {
             DetailSheet(detail!!) { detail = null }
         }
+        if (showGuide) {
+            QualityGuideSheet { showGuide = false }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QualityGuideSheet(onDismiss: () -> Unit) {
+    val sheet = rememberModalBottomSheetState()
+    val s = LocalStrings.current
+    val lang = LocalLang.current
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = SurfaceC) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
+            Text(s.gradeLegend, color = GoldC, fontFamily = displayFamily(lang), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Spacer8()
+            GuideRow("S", GoldC, s.gradeS)
+            GuideRow("A", Accent, s.gradeA)
+            GuideRow("B", BlueC, s.gradeB)
+            GuideRow("C", OrangeC, s.gradeC)
+            Spacer16()
+            SectionLabel(s.radar)
+            Spacer8()
+            Text(s.gaming + ": " + s.gamingDesc, color = TextSecondaryC, fontFamily = monoFamily(lang), fontSize = 11.sp)
+            Text(s.streaming + ": " + s.streamingDesc, color = TextSecondaryC, fontFamily = monoFamily(lang), fontSize = 11.sp)
+            Text(s.stability + ": " + s.stabilityDesc, color = TextSecondaryC, fontFamily = monoFamily(lang), fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+private fun GuideRow(label: String, color: Color, desc: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(24.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
+            Text(label, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp, fontFamily = ShareTechMono)
+        }
+        Box(Modifier.size(12.dp))
+        Text(desc, color = TextPrimaryC, fontFamily = Vazirmatn, fontSize = 11.sp)
     }
 }
 
@@ -451,7 +491,7 @@ private fun StatBox(label: String, value: String, color: Color, lang: Lang, modi
             Box(Modifier.size(2.dp))
             Text(
                 if (fa) label else label.uppercase(),
-                color = TextMutedC, fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                color = TextMutedC, fontFamily = monoFamily(lang),
                 fontSize = if (fa) 9.sp else 8.sp, letterSpacing = if (fa) 0.sp else 1.sp,
                 maxLines = 1,
             )

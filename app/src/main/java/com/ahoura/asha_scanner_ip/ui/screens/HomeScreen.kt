@@ -55,6 +55,7 @@ import com.ahoura.asha_scanner_ip.ui.theme.TextMutedC
 import com.ahoura.asha_scanner_ip.ui.theme.TextSecondaryC
 import com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn
 import com.ahoura.asha_scanner_ip.ui.theme.displayFamily
+import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 
 private val Teal = Color(0xFF14B8A6)
 
@@ -99,9 +100,9 @@ fun HomeScreen(
 
         // ---- Menu ----
         StaggerIn(1) { MenuItemCard(Icons.Filled.Bolt, Accent, s.quickScan, s.quickScanDesc, active = true, onClick = onQuick) }
-        StaggerIn(2) { MenuItemCard(Icons.Filled.Tune, BlueC, s.customScan, s.customScanDesc, active = false, onClick = onCustom) }
-        StaggerIn(3) { MenuItemCard(Icons.Filled.CheckCircle, OrangeC, s.testIps, s.testIpsDesc, active = false, onClick = onTest) }
-        StaggerIn(4) { MenuItemCard(Icons.Filled.Place, Teal, s.discoverColos, s.discoverColosDesc, active = false, onClick = onDiscover) }
+        StaggerIn(2) { MenuItemCard(Icons.Filled.Tune, BlueC, s.customScan, s.customScanDesc, active = true, onClick = onCustom) }
+        StaggerIn(3) { MenuItemCard(Icons.Filled.CheckCircle, OrangeC, s.testIps, s.testIpsDesc, active = true, onClick = onTest) }
+        StaggerIn(4) { MenuItemCard(Icons.Filled.Place, Teal, s.discoverColos, s.discoverColosDesc, active = true, onClick = onDiscover) }
 
         Spacer(Modifier.size(16.dp))
 
@@ -118,7 +119,7 @@ fun HomeScreen(
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(
                     if (lang == Lang.FA) s.telegramChannel else s.telegramChannel.uppercase(),
-                    color = TextMutedC, fontFamily = if (lang == Lang.FA) Vazirmatn else ShareTechMono,
+                    color = TextMutedC, fontFamily = monoFamily(lang),
                     fontSize = if (lang == Lang.FA) 10.sp else 8.sp,
                     letterSpacing = if (lang == Lang.FA) 0.sp else 1.5.sp,
                 )

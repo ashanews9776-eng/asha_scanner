@@ -41,6 +41,7 @@ import com.ahoura.asha_scanner_ip.ui.components.Pill
 import com.ahoura.asha_scanner_ip.ui.components.PresetRow
 import com.ahoura.asha_scanner_ip.ui.components.ScanButton
 import com.ahoura.asha_scanner_ip.ui.components.SectionLabel
+import com.ahoura.asha_scanner_ip.ui.components.TierSelector
 import com.ahoura.asha_scanner_ip.ui.i18n.Lang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
@@ -79,17 +80,25 @@ fun QuickScanScreen(vm: ScanViewModel, onBack: () -> Unit, onStart: () -> Unit) 
 fun ScanSettings(vm: ScanViewModel, cfg: ScanConfig, showAdvancedDefault: Boolean) {
     val s = LocalStrings.current
     var advanced by remember { mutableStateOf(showAdvancedDefault) }
-    var customCount by remember { mutableStateOf(false) }
-    var customWorkers by remember { mutableStateOf(false) }
-    var customTimeout by remember { mutableStateOf(false) }
-    var customPort by remember { mutableStateOf(false) }
+    
+    // When a tier is selected (other than CUSTOM), reset the "custom" toggles
+    // so the presets are correctly highlighted.
+    var customCount by remember(cfg.tier) { mutableStateOf(false) }
+    var customWorkers by remember(cfg.tier) { mutableStateOf(false) }
+    var customTimeout by remember(cfg.tier) { mutableStateOf(false) }
+    var customPort by remember(cfg.tier) { mutableStateOf(false) }
 
-    val counts = listOf(5_000, 20_000, 100_000)
+    val counts = listOf(500, 1000, 5000) // Updated presets to be more realistic
     val workers = listOf(50, 100, 200)
     val timeouts = listOf(3, 5, 10)
     val ports = listOf(443, 2053, 2083, 2086, 2096, 8443)
 
     Spacer(Modifier.size(8.dp))
+    SectionLabel(s.mode)
+    Spacer(Modifier.size(6.dp))
+    TierSelector(selected = cfg.tier, onSelect = vm::setTier)
+
+    Spacer(Modifier.size(14.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         SectionLabel(s.count)
         Spacer(Modifier.size(8.dp))
@@ -100,11 +109,13 @@ fun ScanSettings(vm: ScanViewModel, cfg: ScanConfig, showAdvancedDefault: Boolea
     }
     Spacer(Modifier.size(6.dp))
     PresetRow(
-        options = listOf("5K", "20K", "100K", "···"),
+        options = listOf("500", "1K", "5K", "···"),
         selectedIndex = if (customCount) 3 else counts.indexOf(cfg.count).let { if (it < 0) 3 else it },
     ) { i ->
-        if (i < 3) { customCount = false; vm.updateScanConfig { it.copy(count = counts[i]) } }
-        else customCount = true
+        if (i < 3) { 
+            customCount = false
+            vm.updateScanConfig { it.copy(count = counts[i], tier = com.ahoura.asha_scanner_ip.core.model.ScanTier.CUSTOM) } 
+        } else customCount = true
     }
     if (customCount) {
         Spacer(Modifier.size(6.dp))
@@ -120,8 +131,10 @@ fun ScanSettings(vm: ScanViewModel, cfg: ScanConfig, showAdvancedDefault: Boolea
         options = listOf("50", "100", "200", "···"),
         selectedIndex = if (customWorkers) 3 else workers.indexOf(cfg.concurrency).let { if (it < 0) 3 else it },
     ) { i ->
-        if (i < 3) { customWorkers = false; vm.updateScanConfig { it.copy(concurrency = workers[i]) } }
-        else customWorkers = true
+        if (i < 3) { 
+            customWorkers = false
+            vm.updateScanConfig { it.copy(concurrency = workers[i], tier = com.ahoura.asha_scanner_ip.core.model.ScanTier.CUSTOM) } 
+        } else customWorkers = true
     }
     if (customWorkers) {
         Spacer(Modifier.size(6.dp))
@@ -137,8 +150,10 @@ fun ScanSettings(vm: ScanViewModel, cfg: ScanConfig, showAdvancedDefault: Boolea
         options = listOf("3s", "5s", "10s", "···"),
         selectedIndex = if (customTimeout) 3 else (cfg.timeoutMs / 1000).toInt().let { timeouts.indexOf(it) }.let { if (it < 0) 3 else it },
     ) { i ->
-        if (i < 3) { customTimeout = false; vm.updateScanConfig { it.copy(timeoutMs = timeouts[i].toLong() * 1000) } }
-        else customTimeout = true
+        if (i < 3) { 
+            customTimeout = false
+            vm.updateScanConfig { it.copy(timeoutMs = timeouts[i].toLong() * 1000, tier = com.ahoura.asha_scanner_ip.core.model.ScanTier.CUSTOM) } 
+        } else customTimeout = true
     }
     if (customTimeout) {
         Spacer(Modifier.size(6.dp))

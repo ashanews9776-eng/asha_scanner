@@ -147,6 +147,7 @@ fun CustomScanScreen(vm: ScanViewModel, onBack: () -> Unit, onStart: () -> Unit)
 
 @Composable
 private fun IspChip(label: String, modifier: Modifier, onClick: () -> Unit) {
+    val lang = LocalLang.current
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(5.dp))
@@ -156,6 +157,6 @@ private fun IspChip(label: String, modifier: Modifier, onClick: () -> Unit) {
             .padding(vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, color = Accent, fontFamily = com.ahoura.asha_scanner_ip.ui.theme.ShareTechMono, fontSize = 10.sp)
+        Text(label, color = Accent, fontFamily = com.ahoura.asha_scanner_ip.ui.theme.monoFamily(lang), fontSize = 10.sp)
     }
 }
