@@ -52,13 +52,21 @@ jobs:
 
       - name: Rename APK
         run: |
-          mv app/build/outputs/apk/release/*.apk app/build/outputs/apk/release/asha_scanner.apk
+          cd app/build/outputs/apk/release
+          cp app-arm64-v8a-release.apk asha_scanner_arm64-v8a.apk 2>/dev/null || cp app-arm64-v8a-release-unsigned.apk asha_scanner_arm64-v8a.apk || true
+          cp app-armeabi-v7a-release.apk asha_scanner_armeabi-v7a.apk 2>/dev/null || cp app-armeabi-v7a-release-unsigned.apk asha_scanner_armeabi-v7a.apk || true
+          cp app-universal-release.apk asha_scanner_universal.apk 2>/dev/null || cp app-universal-release-unsigned.apk asha_scanner_universal.apk || true
+          cp asha_scanner_arm64-v8a.apk asha_scanner.apk || true
 
       - name: Create Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          files: app/build/outputs/apk/release/asha_scanner.apk
+          files: |
+            app/build/outputs/apk/release/asha_scanner.apk
+            app/build/outputs/apk/release/asha_scanner_arm64-v8a.apk
+            app/build/outputs/apk/release/asha_scanner_armeabi-v7a.apk
+            app/build/outputs/apk/release/asha_scanner_universal.apk
           draft: false
           prerelease: false
           generate_release_notes: true

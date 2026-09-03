@@ -32,7 +32,8 @@ object ProxyParser {
     }
 
     private fun parseVless(raw: String): ProxyConfig {
-        val body = raw.removePrefix("vless://")
+        val schemeSep = raw.indexOf("://")
+        val body = if (schemeSep >= 0) raw.substring(schemeSep + 3) else raw
         val parts = splitLink(body)
         if (parts.credential.isBlank()) throw ParseException("VLESS link missing UUID")
         val q = parts.query
@@ -63,7 +64,8 @@ object ProxyParser {
     }
 
     private fun parseTrojan(raw: String): ProxyConfig {
-        val body = raw.removePrefix("trojan://")
+        val schemeSep = raw.indexOf("://")
+        val body = if (schemeSep >= 0) raw.substring(schemeSep + 3) else raw
         val parts = splitLink(body)
         if (parts.credential.isBlank()) throw ParseException("Trojan link missing password")
         val q = parts.query

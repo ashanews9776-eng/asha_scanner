@@ -76,7 +76,12 @@ import com.ahoura.asha_scanner_ip.ui.theme.displayFamily
 import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 
 @Composable
-fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
+fun ResultsScreen(
+    vm: ScanViewModel,
+    onAgain: () -> Unit,
+    onBack: () -> Unit,
+    onConnectVpn: ((cleanIp: String) -> Unit)? = null,
+) {
     val state by vm.state.collectAsState()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -142,10 +147,37 @@ fun ResultsScreen(vm: ScanViewModel, onAgain: () -> Unit, onBack: () -> Unit) {
                         )
                     }
                 }
-                Spacer8()
                 // ---- Quality Legend ----
                 if (showLegend) {
                     GradeLegend()
+                    Spacer8()
+                }
+
+                // ---- One-Tap Connect with Best Clean IP ----
+                if (results.isNotEmpty() && onConnectVpn != null) {
+                    val bestIp = results.first().ip
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(AccentMuted)
+                            .border(1.dp, AccentBorder, RoundedCornerShape(6.dp))
+                            .clickable { onConnectVpn(bestIp) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("⚡", fontSize = 14.sp)
+                            androidx.compose.foundation.layout.Spacer(Modifier.size(6.dp))
+                            Text(
+                                "${s.connectWithCleanIp} ($bestIp)",
+                                color = Accent,
+                                fontFamily = if (lang == Lang.FA) com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn else ShareTechMono,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
                     Spacer8()
                 }
 

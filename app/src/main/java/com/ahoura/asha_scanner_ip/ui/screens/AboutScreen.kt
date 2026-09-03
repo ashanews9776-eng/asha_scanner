@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ahoura.asha_scanner_ip.BuildConfig
 import com.ahoura.asha_scanner_ip.ui.TELEGRAM_HANDLE
 import com.ahoura.asha_scanner_ip.ui.TELEGRAM_URL
 import com.ahoura.asha_scanner_ip.ui.components.CyberAppBar
@@ -59,7 +60,7 @@ fun AboutScreen(onBack: () -> Unit) {
         Column(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Spacer(Modifier.size(8.dp))
             Text("ASHA SCANNER", color = Accent, fontFamily = ShareTechMono, fontSize = 16.sp, letterSpacing = 2.sp)
-            Pill("v0.6.3 · IR-OPTIMIZED")
+            Pill("v${BuildConfig.VERSION_NAME} · IR-OPTIMIZED")
             Text(
                 s.aboutBlurb,
                 color = TextSecondaryC,

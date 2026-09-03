@@ -83,7 +83,8 @@ class Prober(private val cfg: ScanConfig) {
                         }
                     }
                 }
-            } catch (_: Throwable) {
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 // failed attempt — recorded as loss
             } finally {
                 runCatching { ssl?.close() }

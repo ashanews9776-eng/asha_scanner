@@ -45,6 +45,8 @@ object Tls {
     fun dial(ip: String, port: Int, connectTimeoutMs: Int): Socket {
         val socket = Socket()
         socket.tcpNoDelay = true
+        // Rapid socket teardown without leaving sockets in kernel TIME_WAIT when probing thousands of IPs
+        runCatching { socket.setSoLinger(true, 0) }
         // Resolve the literal directly (no DNS lookup) so dialing a scanned IP
         // never touches a resolver — faster and avoids leaking lookups.
         val addr = java.net.InetAddress.getByName(ip)

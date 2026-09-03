@@ -169,12 +169,12 @@ class ScanEngine(
         }
 
         log("Phase 2: Running throughput validation on top ${results.size} survivors")
-        val validated = Collections.synchronizedList(ArrayList<ScanResult>())
+        val candidates = Collections.synchronizedList(ArrayList(results))
         val vDone = AtomicInteger(0)
         val vIdx = AtomicInteger(0)
         val vTotal = results.size
         
-        send(ScanProgress(phase = ScanPhase.VALIDATING, tested = grandTotal, total = grandTotal, found = foundCount.get(), validated = 0, validateTotal = vTotal, elapsedMs = elapsed(), best = results, usingFallback = usingFallback, logs = snapshotLogs()))
+        send(ScanProgress(phase = ScanPhase.VALIDATING, tested = grandTotal, total = grandTotal, found = foundCount.get(), validated = 0, validateTotal = vTotal, elapsedMs = elapsed(), best = ArrayList(candidates), usingFallback = usingFallback, logs = snapshotLogs()))
 
         coroutineScope {
             val vConcurrency = 4.coerceAtMost(vTotal).coerceAtLeast(1)
@@ -183,21 +183,46 @@ class ScanEngine(
                     while (isActive) {
                         val i = vIdx.getAndIncrement()
                         if (i >= vTotal) break
-                        val r = results[i]
-                        log("Testing throughput: ${r.ip}...")
-                        val enriched = validator.validate(r, proxy, cfg)
-                        validated.add(enriched)
+                        val orig = candidates[i]
+                        log("Testing throughput: ${orig.ip}...")
+                        val enriched = validator.validate(orig, proxy, cfg)
+                        synchronized(candidates) {
+                            candidates[i] = enriched
+                        }
                         val d = vDone.incrementAndGet()
-                        val current = synchronized(validated) { ResultSort.bySpeed(ArrayList(validated)) }
-                        send(ScanProgress(phase = ScanPhase.VALIDATING, tested = grandTotal, total = grandTotal, found = foundCount.get(), validated = d, validateTotal = vTotal, elapsedMs = elapsed(), best = current, usingFallback = usingFallback, logs = snapshotLogs()))
+                        val currentBest = synchronized(candidates) {
+                            ResultSort.bySpeed(ArrayList(candidates))
+                        }
+                        send(
+                            ScanProgress(
+                                phase = ScanPhase.VALIDATING,
+                                tested = grandTotal, total = grandTotal,
+                                found = foundCount.get(),
+                                validated = d, validateTotal = vTotal,
+                                elapsedMs = elapsed(), best = currentBest,
+                                usingFallback = usingFallback,
+                                logs = snapshotLogs(),
+                            )
+                        )
                     }
                 }
             }.joinAll()
         }
 
-        val finalBest = synchronized(validated) { ResultSort.bySpeed(ArrayList(validated)) }
+        val finalBest = synchronized(candidates) { ResultSort.bySpeed(ArrayList(candidates)) }
         log("Scan complete. Best speed: ${String.format(java.util.Locale.US, "%.2f", finalBest.firstOrNull()?.throughputMbps ?: 0.0)} Mbps")
-        send(ScanProgress(phase = ScanPhase.DONE, tested = grandTotal, total = grandTotal, found = foundCount.get(), validated = vDone.get(), validateTotal = vTotal, elapsedMs = elapsed(), best = finalBest, usingFallback = usingFallback, logs = snapshotLogs()))
+        send(
+            ScanProgress(
+                phase = ScanPhase.DONE,
+                tested = grandTotal, total = grandTotal,
+                found = foundCount.get(),
+                validated = vDone.get(), validateTotal = vTotal,
+                elapsedMs = elapsed(),
+                best = finalBest,
+                usingFallback = usingFallback,
+                logs = snapshotLogs(),
+            )
+        )
     }
 
     private companion object {

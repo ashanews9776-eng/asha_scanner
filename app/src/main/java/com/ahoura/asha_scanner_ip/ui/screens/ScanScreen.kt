@@ -105,7 +105,7 @@ fun ScanLiveScreen(vm: ScanViewModel, onCancel: () -> Unit, onFinished: () -> Un
     // jump the table to the SPEED sort since that's what the user now cares about.
     LaunchedEffect(p.phase) {
         if (validating) sortTab = 3
-        if (p.phase == ScanPhase.DONE || p.phase == ScanPhase.CANCELLED) onFinished()
+        if (p.phase == ScanPhase.DONE || p.phase == ScanPhase.CANCELLED || p.phase == ScanPhase.ERROR) onFinished()
     }
 
     val results = remember(p.best, sortTab) {

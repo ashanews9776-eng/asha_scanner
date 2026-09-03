@@ -16,7 +16,10 @@ import java.util.concurrent.atomic.AtomicReference
 class SubServer(private val port: Int = 8081) {
     private var serverSocket: ServerSocket? = null
     private val currentResults = AtomicReference<Pair<List<ScanResult>, ProxyConfig?>>(emptyList<ScanResult>() to null)
+    @Volatile
     private var running = false
+
+    val isListening: Boolean get() = running && serverSocket?.isBound == true
 
     fun updateResults(results: List<ScanResult>, proxy: ProxyConfig?) {
         currentResults.set(results to proxy)

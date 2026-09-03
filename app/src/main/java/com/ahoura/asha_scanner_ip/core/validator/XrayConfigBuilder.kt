@@ -19,22 +19,104 @@ import org.json.JSONObject
 object XrayConfigBuilder {
 
     /**
-     * @param candidateIp the Cloudflare edge IP to test (replaces proxy.address)
-     * @param socksPort   local SOCKS5 listen port for the test client
+     * Builds a full client config suitable for VPN routing, including SOCKS5, HTTP inbounds,
+     * direct rules for LAN, and DNS configuration.
      */
-    fun build(proxy: ProxyConfig, candidateIp: String, socksPort: Int): JSONObject {
+    fun buildClientVpnConfig(
+        proxy: ProxyConfig,
+        candidateIp: String? = null,
+        socksPort: Int = 10808,
+        httpPort: Int = 10809,
+    ): JSONObject {
         val root = JSONObject()
-        root.put("log", JSONObject().put("loglevel", "none"))
-        root.put("inbounds", JSONArray().put(buildInbound(socksPort)))
-        root.put("outbounds", JSONArray().put(buildOutbound(proxy, candidateIp)))
+        root.put("log", JSONObject().put("loglevel", "warning"))
+
+        val inbounds = JSONArray()
+        inbounds.put(buildTunInbound())
+        inbounds.put(buildInbound(socksPort, tag = "socks-in"))
+        inbounds.put(buildHttpInbound(httpPort, tag = "http-in"))
+        root.put("inbounds", inbounds)
+
+        val outbounds = JSONArray()
+        outbounds.put(buildOutbound(proxy, candidateIp ?: proxy.address))
+        outbounds.put(JSONObject().apply {
+            put("tag", "direct")
+            put("protocol", "freedom")
+            put("settings", JSONObject())
+        })
+        outbounds.put(JSONObject().apply {
+            put("tag", "block")
+            put("protocol", "blackhole")
+            put("settings", JSONObject())
+        })
+        root.put("outbounds", outbounds)
+
+        val routing = JSONObject()
+        routing.put("domainStrategy", "IPIfNonMatch")
+        val rules = JSONArray()
+        // Direct LAN / local traffic
+        rules.put(JSONObject().apply {
+            put("type", "field")
+            put("ip", JSONArray(listOf(
+                "10.0.0.0/8",
+                "172.16.0.0/12",
+                "192.168.0.0/16",
+                "127.0.0.0/8",
+                "100.64.0.0/10",
+                "169.254.0.0/16",
+                "::1/128",
+                "fc00::/7",
+                "fe80::/10"
+            )))
+            put("outboundTag", "direct")
+        })
+        // Proxy everything else
+        rules.put(JSONObject().apply {
+            put("type", "field")
+            put("network", "tcp,udp")
+            put("outboundTag", "proxy")
+        })
+        routing.put("rules", rules)
+        root.put("routing", routing)
+
+        val dns = JSONObject()
+        dns.put("servers", JSONArray(listOf("1.1.1.1", "8.8.8.8", "https://cloudflare-dns.com/dns-query")))
+        root.put("dns", dns)
+
         return root
     }
 
-    fun buildJson(proxy: ProxyConfig, candidateIp: String, socksPort: Int): String =
-        build(proxy, candidateIp, socksPort).toString(2)
+    fun buildClientVpnJson(
+        proxy: ProxyConfig,
+        candidateIp: String? = null,
+        socksPort: Int = 10808,
+        httpPort: Int = 10809,
+    ): String = buildClientVpnConfig(proxy, candidateIp, socksPort, httpPort).toString(2)
 
-    private fun buildInbound(socksPort: Int): JSONObject = JSONObject().apply {
-        put("tag", "socks-in")
+    private fun buildTunInbound(): JSONObject = JSONObject().apply {
+        put("tag", "tun")
+        put("protocol", "tun")
+        put("settings", JSONObject().apply {
+            put("name", "xray0")
+            put("MTU", 1500)
+            put("userLevel", 8)
+        })
+        put("sniffing", JSONObject().apply {
+            put("enabled", true)
+            put("destOverride", JSONArray(listOf("http", "tls", "quic")))
+        })
+    }
+
+    private fun buildHttpInbound(httpPort: Int, tag: String = "http-in"): JSONObject = JSONObject().apply {
+        put("tag", tag)
+        put("listen", "127.0.0.1")
+        put("port", httpPort)
+        put("protocol", "http")
+        put("settings", JSONObject().put("auth", "noauth"))
+    }
+
+    private fun buildInbound(socksPort: Int, tag: String = "socks-in"): JSONObject = JSONObject().apply {
+        put("tag", tag)
         put("listen", "127.0.0.1")
         put("port", socksPort)
         put("protocol", "socks")

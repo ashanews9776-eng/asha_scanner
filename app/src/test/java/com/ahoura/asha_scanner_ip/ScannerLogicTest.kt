@@ -31,6 +31,23 @@ class ScannerLogicTest {
     }
 
     @Test
+    fun parsesUppercaseVlessAndTrojan() {
+        val vlessUpper = "VLESS://11111111-2222-3333-4444-555555555555@example.com:443?security=tls#Node"
+        val cv = ProxyParser.parse(vlessUpper)
+        assertEquals(Protocol.VLESS, cv.protocol)
+        assertEquals("11111111-2222-3333-4444-555555555555", cv.uuid)
+        assertEquals("example.com", cv.address)
+        assertEquals(443, cv.port)
+
+        val trojanUpper = "TROJAN://secret-pass@1.2.3.4:8443?security=tls#T"
+        val ct = ProxyParser.parse(trojanUpper)
+        assertEquals(Protocol.TROJAN, ct.protocol)
+        assertEquals("secret-pass", ct.password)
+        assertEquals("1.2.3.4", ct.address)
+        assertEquals(8443, ct.port)
+    }
+
+    @Test
     fun parsesTrojan() {
         val c = ProxyParser.parse("trojan://secret-pass@1.2.3.4:8443?security=tls&sni=s.com#T")
         assertEquals(Protocol.TROJAN, c.protocol)

@@ -50,12 +50,19 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     private val engine = ScanEngine()
     private val settings = SettingsStore(app)
     private val subServer = SubServer()
+    val configStore = com.ahoura.asha_scanner_ip.core.config.ConfigStore(app)
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     val language: StateFlow<Lang> = settings.language
         .stateIn(viewModelScope, SharingStarted.Eagerly, Lang.EN)
+
+    val vpnStats: StateFlow<com.ahoura.asha_scanner_ip.core.vpn.VpnStats> = com.ahoura.asha_scanner_ip.core.vpn.VpnManager.stats
+    val savedProfiles: StateFlow<List<com.ahoura.asha_scanner_ip.core.vpn.VpnProfile>> = configStore.profiles
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val activeProfile: StateFlow<com.ahoura.asha_scanner_ip.core.vpn.VpnProfile?> = configStore.activeProfile
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private var scanJob: Job? = null
 
@@ -323,7 +330,8 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         scanJob = viewModelScope.launch {
             try {
                 engine.scan(proxy, s.scanConfig).collect { p ->
-                    _state.update { it.copy(progress = p, subUrl = subServer.getUrl()) }
+                    val url = if (subServer.isListening) subServer.getUrl() else null
+                    _state.update { it.copy(progress = p, subUrl = url) }
                     subServer.updateResults(p.best, proxy)
                 }
             } catch (_: Throwable) {
@@ -367,6 +375,13 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Configure defaults for Quick Scan (ensures explicit test IPs are cleared). */
+    fun prepareQuickScan() = updateScanConfig {
+        it.copy(explicitIps = emptyList())
+    }.also {
+        _state.update { it.copy(testIpsText = "") }
+    }
+
     /** Configure defaults for the Discover-Colos preset. */
     fun prepareDiscover() = updateScanConfig {
         it.copy(
@@ -374,5 +389,58 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             mode = com.ahoura.asha_scanner_ip.core.model.ProbeMode.HTTP,
             speedTest = false, top = 50, ports = listOf(443),
         )
+    }.also {
+        _state.update { it.copy(testIpsText = "") }
+    }
+
+    // ---- VPN Client Controller ----
+
+    fun startVpn(context: android.content.Context, profile: com.ahoura.asha_scanner_ip.core.vpn.VpnProfile) {
+        com.ahoura.asha_scanner_ip.core.vpn.VpnManager.start(context, profile)
+    }
+
+    fun stopVpn(context: android.content.Context) {
+        com.ahoura.asha_scanner_ip.core.vpn.VpnManager.stop(context)
+    }
+
+    fun addProfile(rawLink: String, customName: String? = null, cleanIp: String? = null) {
+        viewModelScope.launch {
+            runCatching { configStore.addProfile(rawLink, customName, cleanIp) }
+        }
+    }
+
+    fun updateProfile(profile: com.ahoura.asha_scanner_ip.core.vpn.VpnProfile) {
+        viewModelScope.launch { configStore.updateProfile(profile) }
+    }
+
+    fun deleteProfile(id: String) {
+        viewModelScope.launch { configStore.deleteProfile(id) }
+    }
+
+    fun setActiveProfile(id: String) {
+        viewModelScope.launch { configStore.setActiveProfileId(id) }
+    }
+
+    fun updateCleanIp(profileId: String, cleanIp: String?) {
+        viewModelScope.launch { configStore.updateCleanIp(profileId, cleanIp) }
+    }
+
+    fun measurePing(profile: com.ahoura.asha_scanner_ip.core.vpn.VpnProfile) {
+        viewModelScope.launch {
+            val ms = com.ahoura.asha_scanner_ip.core.vpn.VpnManager.measurePing(profile)
+            configStore.updatePing(profile.id, ms)
+        }
+    }
+
+    fun connectWithScannedIp(context: android.content.Context, cleanIp: String, proxy: ProxyConfig?) {
+        viewModelScope.launch {
+            val p = proxy ?: _state.value.parsedProxy ?: return@launch
+            val profile = configStore.addProfile(
+                rawLink = p.raw,
+                customName = "${p.protocol.scheme.uppercase()} - $cleanIp",
+                cleanIp = cleanIp,
+            )
+            startVpn(context, profile)
+        }
     }
 }

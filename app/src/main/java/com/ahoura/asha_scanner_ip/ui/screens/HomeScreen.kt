@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ahoura.asha_scanner_ip.BuildConfig
 import com.ahoura.asha_scanner_ip.core.ipsrc.CloudflareRanges
 import com.ahoura.asha_scanner_ip.ui.TELEGRAM_HANDLE
 import com.ahoura.asha_scanner_ip.ui.TELEGRAM_URL
@@ -46,6 +47,7 @@ import com.ahoura.asha_scanner_ip.ui.i18n.Lang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
+import com.ahoura.asha_scanner_ip.ui.theme.AccentDim
 import com.ahoura.asha_scanner_ip.ui.theme.BlueC
 import com.ahoura.asha_scanner_ip.ui.theme.OrangeC
 import com.ahoura.asha_scanner_ip.ui.theme.Rajdhani
@@ -66,6 +68,7 @@ fun HomeScreen(
     onCustom: () -> Unit,
     onTest: () -> Unit,
     onDiscover: () -> Unit,
+    onVpn: () -> Unit,
     onAbout: () -> Unit,
     onToggleLang: () -> Unit,
 ) {
@@ -94,15 +97,18 @@ fun HomeScreen(
             TypewriterText(s.homeSubtitle, color = TextMutedC, fontSize = 9.sp, letterSpacing = 2.sp)
         }
         Spacer(Modifier.size(8.dp))
-        StaggerIn(0) { Pill("v0.6.3 · IR-OPTIMIZED") }
+        // Version pulled from BuildConfig so the badge can never drift from the
+        // real package version after a release bump.
+        StaggerIn(0) { Pill("v${BuildConfig.VERSION_NAME} · IR-OPTIMIZED") }
 
         Spacer(Modifier.size(24.dp))
 
         // ---- Menu ----
-        StaggerIn(1) { MenuItemCard(Icons.Filled.Bolt, Accent, s.quickScan, s.quickScanDesc, active = true, onClick = onQuick) }
-        StaggerIn(2) { MenuItemCard(Icons.Filled.Tune, BlueC, s.customScan, s.customScanDesc, active = true, onClick = onCustom) }
-        StaggerIn(3) { MenuItemCard(Icons.Filled.CheckCircle, OrangeC, s.testIps, s.testIpsDesc, active = true, onClick = onTest) }
-        StaggerIn(4) { MenuItemCard(Icons.Filled.Place, Teal, s.discoverColos, s.discoverColosDesc, active = true, onClick = onDiscover) }
+        StaggerIn(1) { MenuItemCard(Icons.Filled.Bolt, Accent, s.vpnMode, s.vpnModeDesc, active = true, onClick = onVpn) }
+        StaggerIn(2) { MenuItemCard(Icons.Filled.Bolt, AccentDim, s.quickScan, s.quickScanDesc, active = true, onClick = onQuick) }
+        StaggerIn(3) { MenuItemCard(Icons.Filled.Tune, BlueC, s.customScan, s.customScanDesc, active = true, onClick = onCustom) }
+        StaggerIn(4) { MenuItemCard(Icons.Filled.CheckCircle, OrangeC, s.testIps, s.testIpsDesc, active = true, onClick = onTest) }
+        StaggerIn(5) { MenuItemCard(Icons.Filled.Place, Teal, s.discoverColos, s.discoverColosDesc, active = true, onClick = onDiscover) }
 
         Spacer(Modifier.size(16.dp))
 

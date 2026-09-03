@@ -21,3 +21,12 @@
 # Kotlin coroutines internal — standard keeps (also covered by the shrinker, kept
 # explicitly so debug-info-free internals don't trip strict configs).
 -dontwarn kotlinx.coroutines.**
+
+# libv2ray (Gomobile Xray Core)
+-keep class libv2ray.** { *; }
+-keep interface libv2ray.** { *; }
+-keep class go.** { *; }
+-keep interface go.** { *; }
+-dontwarn libv2ray.**
+-dontwarn go.**
+

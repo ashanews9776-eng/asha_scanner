@@ -107,7 +107,8 @@ class DirectThroughputValidator(
                 speedTested = true,
                 healthy = result.healthy && ok,
             )
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             // Validation failed: keep Phase-1 result but mark speed test as run/empty.
             return result.copy(speedTested = true, throughputBytesPerSec = 0.0)
         } finally {

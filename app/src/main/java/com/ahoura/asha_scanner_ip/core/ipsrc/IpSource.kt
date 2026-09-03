@@ -19,13 +19,17 @@ class IpSource private constructor(
     data class V4Net(val base: Int, val mask: Int)             // 32-bit
     data class V6Net(val base: ByteArray, val mask: ByteArray) // 16 bytes each
 
-    private fun randomV4(n: V4Net): String {
+    private fun randomV4Int(n: V4Net): Int {
         val size = n.mask.inv()                       // host bits as mask
         val offset = rng.nextInt().and(size)
-        val ip = n.base or offset
-        return "${(ip ushr 24) and 0xFF}.${(ip ushr 16) and 0xFF}." +
-            "${(ip ushr 8) and 0xFF}.${ip and 0xFF}"
+        return n.base or offset
     }
+
+    private fun intToV4(ip: Int): String =
+        "${(ip ushr 24) and 0xFF}.${(ip ushr 16) and 0xFF}." +
+            "${(ip ushr 8) and 0xFF}.${ip and 0xFF}"
+
+    private fun randomV4(n: V4Net): String = intToV4(randomV4Int(n))
 
     private fun randomV6(n: V6Net): String {
         val ip = ByteArray(16)
@@ -50,16 +54,34 @@ class IpSource private constructor(
      * on demand and stop early on cancellation.
      */
     fun stream(count: Int): Sequence<String> = sequence {
-        val seen = HashSet<String>(if (count > 0) count * 2 else 1024)
-        var sent = 0
-        var guard = 0
-        val maxGuard = if (count > 0) count * 50L else Long.MAX_VALUE
-        while (count <= 0 || sent < count) {
-            if (guard++ > maxGuard) break // address space exhausted for this size
-            val ip = randomOne()
-            if (seen.add(ip)) {
-                sent++
-                yield(ip)
+        val onlyV4 = v6.isEmpty() && v4.isNotEmpty()
+        if (onlyV4) {
+            val seenV4 = HashSet<Int>(if (count > 0) count * 2 else 1024)
+            var sent = 0
+            var guard = 0
+            val maxGuard = if (count > 0) count * 50L else Long.MAX_VALUE
+            val totalV4 = v4.size
+            while (count <= 0 || sent < count) {
+                if (guard++ > maxGuard) break // address space exhausted for this size
+                val net = v4[rng.nextInt(totalV4)]
+                val ipInt = randomV4Int(net)
+                if (seenV4.add(ipInt)) {
+                    sent++
+                    yield(intToV4(ipInt))
+                }
+            }
+        } else {
+            val seen = HashSet<String>(if (count > 0) count * 2 else 1024)
+            var sent = 0
+            var guard = 0
+            val maxGuard = if (count > 0) count * 50L else Long.MAX_VALUE
+            while (count <= 0 || sent < count) {
+                if (guard++ > maxGuard) break // address space exhausted for this size
+                val ip = randomOne()
+                if (seen.add(ip)) {
+                    sent++
+                    yield(ip)
+                }
             }
         }
     }

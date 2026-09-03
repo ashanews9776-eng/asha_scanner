@@ -46,7 +46,8 @@ class TunnelValidator(
         if (proxy == null || !canTunnel(proxy)) return fallback.validate(result, proxy, cfg)
         return try {
             measureThroughTunnel(result, proxy, cfg)
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             // Tunnel couldn't be established (server quirk, unsupported flow, …):
             // fall back to a direct edge measurement so the IP still gets a score.
             fallback.validate(result, proxy, cfg)

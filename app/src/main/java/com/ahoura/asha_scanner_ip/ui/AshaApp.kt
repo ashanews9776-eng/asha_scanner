@@ -37,13 +37,14 @@ import com.ahoura.asha_scanner_ip.ui.screens.ResultsScreen
 import com.ahoura.asha_scanner_ip.ui.screens.ScanLiveScreen
 import com.ahoura.asha_scanner_ip.ui.screens.TestIpsScreen
 
-enum class Route { HOME, QUICK, CUSTOM, TEST, DISCOVER, LIVE, RESULTS, ABOUT }
+enum class Route { HOME, QUICK, CUSTOM, TEST, DISCOVER, LIVE, RESULTS, VPN, ABOUT }
 
 const val TELEGRAM_HANDLE = "@asha_news2"
 const val TELEGRAM_URL = "https://t.me/asha_news2"
 
 @Composable
 fun AshaApp(vm: ScanViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val stack = remember { mutableStateListOf(Route.HOME) }
     val current = stack.last()
 
@@ -57,9 +58,8 @@ fun AshaApp(vm: ScanViewModel) {
     val direction = if (lang == Lang.FA) LayoutDirection.Rtl else LayoutDirection.Ltr
 
     // Keep the living backdrop in motion only where it earns its keep — the Home
-    // first-impression and the active scan. On form/results/about screens (where
-    // the user reads and lingers) it freezes to a static frame to save battery.
-    val animatedBg = current == Route.HOME || current == Route.LIVE
+    // first-impression, the active scan, and the VPN screen.
+    val animatedBg = current == Route.HOME || current == Route.LIVE || current == Route.VPN
 
     CompositionLocalProvider(
         LocalLayoutDirection provides direction,
@@ -81,10 +81,11 @@ fun AshaApp(vm: ScanViewModel) {
                             when (route) {
                                 Route.HOME -> HomeScreen(
                                     vm = vm,
-                                    onQuick = { push(Route.QUICK) },
+                                    onQuick = { vm.prepareQuickScan(); push(Route.QUICK) },
                                     onCustom = { push(Route.CUSTOM) },
                                     onTest = { push(Route.TEST) },
                                     onDiscover = { vm.prepareDiscover(); push(Route.DISCOVER) },
+                                    onVpn = { push(Route.VPN) },
                                     onAbout = { push(Route.ABOUT) },
                                     onToggleLang = { vm.toggleLanguage() },
                                 )
@@ -113,6 +114,14 @@ fun AshaApp(vm: ScanViewModel) {
                                     vm = vm,
                                     onAgain = { vm.reset(); home() },
                                     onBack = { vm.reset(); home() },
+                                    onConnectVpn = { cleanIp ->
+                                        vm.connectWithScannedIp(context, cleanIp, state.parsedProxy)
+                                        push(Route.VPN)
+                                    },
+                                )
+                                Route.VPN -> com.ahoura.asha_scanner_ip.ui.screens.VpnScreen(
+                                    vm = vm,
+                                    onBack = ::back,
                                 )
                                 Route.ABOUT -> AboutScreen(onBack = ::back)
                             }
