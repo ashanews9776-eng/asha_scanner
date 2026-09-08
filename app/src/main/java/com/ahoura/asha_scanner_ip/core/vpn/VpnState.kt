@@ -43,6 +43,8 @@ data class VpnProfile(
 
 /**
  * Live snapshot of VPN connection status, active profile, duration, and delay.
+ * The up/down fields are a per-second rate (bytes/s), refreshed by the service
+ * timer each second from the core's drained traffic counters.
  */
 data class VpnStats(
     val status: VpnStatus = VpnStatus.DISCONNECTED,
@@ -50,6 +52,6 @@ data class VpnStats(
     val connectedDurationSeconds: Long = 0L,
     val pingMs: Long? = null,
     val errorMessage: String? = null,
-    val uploadBytes: Long = 0L,
-    val downloadBytes: Long = 0L,
+    val uploadBps: Long = 0L,
+    val downloadBps: Long = 0L,
 )

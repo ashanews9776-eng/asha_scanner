@@ -64,6 +64,9 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     val activeProfile: StateFlow<com.ahoura.asha_scanner_ip.core.vpn.VpnProfile?> = configStore.activeProfile
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    val vpnBypassIr: StateFlow<Boolean> = settings.vpnBypassIr
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     private var scanJob: Job? = null
 
     // Built-in open-site fallback domains from assets/cf_domains.txt. Kept apart
@@ -430,6 +433,10 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             val ms = com.ahoura.asha_scanner_ip.core.vpn.VpnManager.measurePing(profile)
             configStore.updatePing(profile.id, ms)
         }
+    }
+
+    fun setVpnBypassIr(value: Boolean) {
+        viewModelScope.launch { settings.setVpnBypassIr(value) }
     }
 
     fun connectWithScannedIp(context: android.content.Context, cleanIp: String, proxy: ProxyConfig?) {

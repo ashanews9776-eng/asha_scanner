@@ -157,6 +157,8 @@ data class AppStrings(
     val connectWithCleanIp: String,
     val vpnPermissionRequired: String,
     val connectedDuration: String,
+    val vpnBypassIr: String,
+    val vpnBypassIrDesc: String,
 )
 
 private val EN = AppStrings(
@@ -298,6 +300,8 @@ private val EN = AppStrings(
     connectWithCleanIp = "Connect with this Clean IP",
     vpnPermissionRequired = "VPN permission is required to start the tunnel",
     connectedDuration = "DURATION",
+    vpnBypassIr = "Bypass Iranian Sites",
+    vpnBypassIrDesc = "Local banks, government and .ir services connect directly instead of through the tunnel",
 )
 
 private val FA = AppStrings(
@@ -439,6 +443,8 @@ private val FA = AppStrings(
     connectWithCleanIp = "اتصال با این آی‌پی تمیز",
     vpnPermissionRequired = "برای برقراری تانل، مجوز وی‌پی‌ان لازم است",
     connectedDuration = "مدت اتصال",
+    vpnBypassIr = "دور زدن سایت‌های ایرانی",
+    vpnBypassIrDesc = "سرویس‌های داخلی مثل بانک‌ها و سایت‌های .ir مستقیم و بدون تانل وصل می‌شوند",
 )
 
 fun stringsFor(lang: Lang): AppStrings = if (lang == Lang.FA) FA else EN

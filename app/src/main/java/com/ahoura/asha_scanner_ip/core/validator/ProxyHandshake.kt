@@ -54,15 +54,20 @@ internal object ProxyHandshake {
         return out
     }
 
-    /** Standard UUID -> 16 bytes; non-UUID ids map to a deterministic MD5 digest. */
+    /**
+     * Standard UUID -> 16 bytes. Real-world VLESS `id`s are UUIDs (xray-core
+     * rejects anything else), so a non-UUID id is rejected here instead of
+     * being hashed into the 16-byte slot: no weak hash primitive in the
+     * handshake path, and callers fall back to a direct edge measurement.
+     */
     fun uuidToBytes(uuid: String): ByteArray {
         val hex = uuid.replace("-", "")
-        if (hex.length == 32 && hex.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) {
-            return ByteArray(16) {
-                ((hex[it * 2].digitToInt(16) shl 4) or hex[it * 2 + 1].digitToInt(16)).toByte()
-            }
+        require(hex.length == 32 && hex.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) {
+            "VLESS id is not a valid UUID"
         }
-        return MessageDigest.getInstance("MD5").digest(uuid.toByteArray(Charsets.UTF_8))
+        return ByteArray(16) {
+            ((hex[it * 2].digitToInt(16) shl 4) or hex[it * 2 + 1].digitToInt(16)).toByte()
+        }
     }
 
     fun sha224Hex(s: String): String {

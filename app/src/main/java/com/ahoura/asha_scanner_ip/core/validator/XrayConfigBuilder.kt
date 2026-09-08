@@ -27,6 +27,7 @@ object XrayConfigBuilder {
         candidateIp: String? = null,
         socksPort: Int = 10808,
         httpPort: Int = 10809,
+        bypassIran: Boolean = false,
     ): JSONObject {
         val root = JSONObject()
         root.put("log", JSONObject().put("loglevel", "warning"))
@@ -54,6 +55,23 @@ object XrayConfigBuilder {
         val routing = JSONObject()
         routing.put("domainStrategy", "IPIfNonMatch")
         val rules = JSONArray()
+        if (bypassIran) {
+            // Iranian split tunneling: every .ir domain + the curated Iranian
+            // services geosite, plus Iranian IP ranges, bypass the tunnel so
+            // banks / government / local apps keep working at native speed
+            // while the VPN is up. Loads the trimmed geoip.dat / geosite.dat
+            // bundled in assets (entries "IR" / "ir"; loaders match fold-case).
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("domain", JSONArray(listOf("geosite:ir")))
+                put("outboundTag", "direct")
+            })
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("ip", JSONArray(listOf("geoip:ir")))
+                put("outboundTag", "direct")
+            })
+        }
         // Direct LAN / local traffic
         rules.put(JSONObject().apply {
             put("type", "field")
@@ -83,6 +101,22 @@ object XrayConfigBuilder {
         dns.put("servers", JSONArray(listOf("1.1.1.1", "8.8.8.8", "https://cloudflare-dns.com/dns-query")))
         root.put("dns", dns)
 
+        // Traffic stats: without these policy flags xray-core never registers
+        // the per-outbound uplink/downlink counters, so queryAllOutboundTrafficStats()
+        // returns an empty string and the VPN screen shows "—" forever. This
+        // mirrors the stats/policy block v2rayNG ships in every client config.
+        root.put("stats", JSONObject())
+        root.put("policy", JSONObject().apply {
+            put("levels", JSONObject().put("0", JSONObject().apply {
+                put("statsUserUplink", true)
+                put("statsUserDownlink", true)
+            }))
+            put("system", JSONObject().apply {
+                put("statsOutboundUplink", true)
+                put("statsOutboundDownlink", true)
+            })
+        })
+
         return root
     }
 
@@ -91,7 +125,8 @@ object XrayConfigBuilder {
         candidateIp: String? = null,
         socksPort: Int = 10808,
         httpPort: Int = 10809,
-    ): String = buildClientVpnConfig(proxy, candidateIp, socksPort, httpPort).toString(2)
+        bypassIran: Boolean = false,
+    ): String = buildClientVpnConfig(proxy, candidateIp, socksPort, httpPort, bypassIran).toString(2)
 
     private fun buildTunInbound(): JSONObject = JSONObject().apply {
         put("tag", "tun")

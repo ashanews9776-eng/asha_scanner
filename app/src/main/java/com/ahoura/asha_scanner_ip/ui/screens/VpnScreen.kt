@@ -63,6 +63,7 @@ import com.ahoura.asha_scanner_ip.ui.ScanViewModel
 import com.ahoura.asha_scanner_ip.ui.components.ConfigManagerBottomSheet
 import com.ahoura.asha_scanner_ip.ui.components.CyberAppBar
 import com.ahoura.asha_scanner_ip.ui.components.CyberCard
+import com.ahoura.asha_scanner_ip.ui.components.CyberToggle
 import com.ahoura.asha_scanner_ip.ui.components.LottieSonar
 import com.ahoura.asha_scanner_ip.ui.components.Pill
 import com.ahoura.asha_scanner_ip.ui.components.SectionLabel
@@ -100,6 +101,7 @@ fun VpnScreen(
 
     val vpnStats by vm.vpnStats.collectAsState()
     val activeProfile by vm.activeProfile.collectAsState()
+    val bypassIr by vm.vpnBypassIr.collectAsState()
     val bestScannedIps = vm.state.collectAsState().value.progress.best.filter { it.healthy }
 
     var showConfigManager by remember { mutableStateOf(false) }
@@ -389,6 +391,43 @@ fun VpnScreen(
                 }
             }
 
+            // ---- Iranian split tunneling toggle ----
+            CyberCard(
+                Modifier.fillMaxWidth(),
+                padding = androidx.compose.foundation.layout.PaddingValues(14.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (fa) s.vpnBypassIr else s.vpnBypassIr.uppercase(),
+                            color = Accent,
+                            fontFamily = displayFamily(lang),
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            letterSpacing = if (fa) 0.sp else 0.5.sp,
+                        )
+                        Spacer(Modifier.size(2.dp))
+                        Text(
+                            s.vpnBypassIrDesc,
+                            color = TextSecondaryC,
+                            fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp,
+                        )
+                    }
+                    Spacer(Modifier.size(10.dp))
+                    CyberToggle(checked = bypassIr, onChange = { vm.setVpnBypassIr(it) })
+                }
+            }
+
+            // ---- Live traffic (rates are refreshed by the service each second) ----
+            if (vpnStats.status.isConnected) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SpeedBox("↓", vpnStats.downloadBps, AccentDim, Modifier.weight(1f))
+                    SpeedBox("↑", vpnStats.uploadBps, BlueC, Modifier.weight(1f))
+                }
+            }
+
             // ---- Fast Clean IP Quick Switcher (if scan results available) ----
             if (activeProfile != null && bestScannedIps.isNotEmpty()) {
                 Spacer(Modifier.size(2.dp))
@@ -452,6 +491,39 @@ fun VpnScreen(
             )
         }
     }
+}
+
+@Composable
+private fun SpeedBox(arrow: String, bps: Long, color: Color, modifier: Modifier) {
+    Box(
+        modifier
+            .height(64.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(SurfaceC)
+            .border(0.5.dp, BorderC, RoundedCornerShape(6.dp))
+            .padding(10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(arrow, color = color, fontFamily = ShareTechMono, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.size(6.dp))
+            Text(
+                formatSpeed(bps),
+                color = if (bps > 0) color else TextMutedC,
+                fontFamily = ShareTechMono,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+/** Live per-second rate in compact human units; — when idle. */
+private fun formatSpeed(bps: Long): String = when {
+    bps >= 1_000_000 -> "%.1f MB/s".format(bps / 1_000_000.0)
+    bps >= 1_000 -> "${bps / 1_000} KB/s"
+    bps > 0 -> "$bps B/s"
+    else -> "—"
 }
 
 @Composable

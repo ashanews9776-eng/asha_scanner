@@ -24,11 +24,13 @@ class ProxyHandshakeTest {
     }
 
     @Test
-    fun nonUuidIdMapsToSixteenDeterministicBytes() {
-        val a = ProxyHandshake.uuidToBytes("not-a-uuid")
-        val b = ProxyHandshake.uuidToBytes("not-a-uuid")
-        assertEquals(16, a.size)
-        assertArrayEquals(a, b) // deterministic
+    fun nonUuidIdIsRejected() {
+        try {
+            ProxyHandshake.uuidToBytes("not-a-uuid")
+            org.junit.Assert.fail("expected non-UUID id to be rejected")
+        } catch (_: IllegalArgumentException) {
+            // expected: no lenient hashing of arbitrary strings into the id slot
+        }
     }
 
     @Test

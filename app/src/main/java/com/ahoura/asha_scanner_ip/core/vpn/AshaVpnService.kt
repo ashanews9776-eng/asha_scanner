@@ -16,6 +16,7 @@ import com.ahoura.asha_scanner_ip.core.model.ProxyConfig
 import com.ahoura.asha_scanner_ip.core.net.Tls
 import com.ahoura.asha_scanner_ip.core.parser.ProxyParser
 import com.ahoura.asha_scanner_ip.core.validator.XrayConfigBuilder
+import com.ahoura.asha_scanner_ip.data.SettingsStore
 import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController
 import libv2ray.Libv2ray
@@ -23,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.net.Socket
@@ -144,7 +146,8 @@ class AshaVpnService : VpnService(), CoreCallbackHandler {
 
         scope.launch {
             try {
-                // Unpack geoip and geosite assets if needed
+                // Unpack the bundled geo assets (needed when the bypass-Iran
+                // routing rules reference geosite:ir / geoip:ir).
                 unpackGeoAssets(applicationContext)
 
                 // Clear any bad xudp.basekey from previous process run
@@ -156,7 +159,10 @@ class AshaVpnService : VpnService(), CoreCallbackHandler {
                 coreController = Libv2ray.newCoreController(this@AshaVpnService)
 
                 // Build client JSON config
-                val configJson = XrayConfigBuilder.buildClientVpnJson(proxy, cleanIp)
+                val bypassIran = runCatching {
+                    SettingsStore(applicationContext).vpnBypassIr.first()
+                }.getOrDefault(true)
+                val configJson = XrayConfigBuilder.buildClientVpnJson(proxy, cleanIp, bypassIran = bypassIran)
 
                 // Establish TUN interface
                 val builder = Builder()
@@ -208,7 +214,25 @@ class AshaVpnService : VpnService(), CoreCallbackHandler {
             while (isActive) {
                 delay(1000)
                 val duration = (System.currentTimeMillis() - connectedStartMs) / 1000
-                VpnManager.updateStats { it.copy(connectedDurationSeconds = duration) }
+                // queryAllOutboundTrafficStats drains (resets) the core's
+                // per-outbound counters, so each read is the last second's
+                // bytes — a live up/down rate. Summed across all outbounds
+                // (proxy + direct) so bypassed Iranian traffic counts too.
+                val raw = runCatching { coreController?.queryAllOutboundTrafficStats() }.getOrNull().orEmpty()
+                var upBps = 0L
+                var downBps = 0L
+                for (entry in raw.split(';')) {
+                    val parts = entry.split(',')
+                    if (parts.size != 3) continue
+                    val v = parts[2].toLongOrNull() ?: continue
+                    when (parts[1]) {
+                        "uplink" -> upBps += v
+                        "downlink" -> downBps += v
+                    }
+                }
+                VpnManager.updateStats {
+                    it.copy(connectedDurationSeconds = duration, uploadBps = upBps, downloadBps = downBps)
+                }
             }
         }
     }
@@ -238,6 +262,8 @@ class AshaVpnService : VpnService(), CoreCallbackHandler {
                 status = if (it.status == VpnStatus.ERROR) VpnStatus.ERROR else VpnStatus.DISCONNECTED,
                 connectedDurationSeconds = 0L,
                 pingMs = null,
+                uploadBps = 0L,
+                downloadBps = 0L,
             )
         }
 
@@ -324,16 +350,28 @@ class AshaVpnService : VpnService(), CoreCallbackHandler {
     }
 
     private fun unpackGeoAssets(context: Context) {
-        val datFiles = listOf("geoip.dat", "geosite.dat", "geoip-only-cn-private.dat")
+        // Only the trimmed Iran-focused databases we bundle (the full public
+        // lists are ~27MB — our assets carry just the "IR" entries, ~40KB).
+        // ALWAYS overwrite: an older install may have left a stale or
+        // truncated geo file in filesDir, and xray fails with a misleading
+        // "... EOF" while parsing it. Copy is atomic (tmp + rename) so a
+        // killed process can never leave a half-written database behind.
+        val datFiles = listOf("geoip.dat", "geosite.dat")
         for (name in datFiles) {
-            val target = java.io.File(context.filesDir, name)
-            if (!target.exists() || target.length() == 0L) {
-                runCatching {
-                    context.assets.open(name).use { input ->
-                        target.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
+            runCatching {
+                val tmp = java.io.File(context.filesDir, "$name.tmp")
+                context.assets.open(name).use { input ->
+                    tmp.outputStream().use { output -> input.copyTo(output) }
+                }
+                if (tmp.length() > 0L) {
+                    val target = java.io.File(context.filesDir, name)
+                    if (target.exists() && !target.delete()) {
+                        tmp.delete()
+                        return@runCatching
                     }
+                    if (!tmp.renameTo(target)) tmp.delete()
+                } else {
+                    tmp.delete()
                 }
             }
         }
