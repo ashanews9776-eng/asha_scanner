@@ -37,10 +37,9 @@ object ConfigLinkBuilder {
 
         // 3. Ensure SNI and Security for Cloudflare/TLS
         // If we're using a bare IP, we MUST have SNI if TLS is used.
+        val extra = ArrayList<String>()
         val originalDomain = proxy.address
         if (originalDomain.isNotBlank() && !isIpLiteral(originalDomain)) {
-            val extra = ArrayList<String>()
-            
             // Check if it's a known TLS port or security is already set to tls/reality
             val isTlsPort = isCloudflareTlsPort(port)
             val currentSecurity = getParam(base, "security")?.lowercase() ?: ""
@@ -62,11 +61,18 @@ object ConfigLinkBuilder {
             if (isHttpLike && !containsParam(base, "host")) {
                 extra.add("host=$originalDomain")
             }
+        }
 
-            if (extra.isNotEmpty()) {
-                base += if (base.contains("?")) "&" else "?"
-                base += extra.joinToString("&")
-            }
+        if (proxy.cipherSuites.isNotBlank() && !containsParam(base, "cs") && !containsParam(base, "cipherSuites")) {
+            extra.add("cs=${proxy.cipherSuites}")
+        }
+        if (proxy.dialMode.isNotBlank() && !containsParam(base, "dialMode")) {
+            extra.add("dialMode=${proxy.dialMode}")
+        }
+
+        if (extra.isNotEmpty()) {
+            base += if (base.contains("?")) "&" else "?"
+            base += extra.joinToString("&")
         }
 
         // 4. Update the fragment with the new IP

@@ -2,6 +2,8 @@ package com.ahoura.asha_scanner_ip.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,8 +20,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Place
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -49,6 +52,7 @@ import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
 import com.ahoura.asha_scanner_ip.ui.theme.AccentDim
 import com.ahoura.asha_scanner_ip.ui.theme.BlueC
+import com.ahoura.asha_scanner_ip.ui.theme.GoldC
 import com.ahoura.asha_scanner_ip.ui.theme.OrangeC
 import com.ahoura.asha_scanner_ip.ui.theme.Rajdhani
 import com.ahoura.asha_scanner_ip.ui.theme.ShareTechMono
@@ -69,6 +73,7 @@ fun HomeScreen(
     onTest: () -> Unit,
     onDiscover: () -> Unit,
     onVpn: () -> Unit,
+    onDns: () -> Unit,
     onAbout: () -> Unit,
     onToggleLang: () -> Unit,
 ) {
@@ -76,8 +81,14 @@ fun HomeScreen(
     val s = LocalStrings.current
     val lang = LocalLang.current
     val state by vm.state.collectAsState()
+    val scrollState = rememberScrollState()
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(horizontal = 12.dp)
+    ) {
         Spacer(Modifier.size(24.dp))
 
         // ---- Header ----
@@ -101,14 +112,20 @@ fun HomeScreen(
         // real package version after a release bump.
         StaggerIn(0) { Pill("v${BuildConfig.VERSION_NAME} · IR-OPTIMIZED") }
 
-        Spacer(Modifier.size(24.dp))
+        Spacer(Modifier.size(20.dp))
 
         // ---- Menu ----
         StaggerIn(1) { MenuItemCard(Icons.Filled.Bolt, Accent, s.vpnMode, s.vpnModeDesc, active = true, onClick = onVpn) }
+        Spacer(Modifier.size(8.dp))
         StaggerIn(2) { MenuItemCard(Icons.Filled.Bolt, AccentDim, s.quickScan, s.quickScanDesc, active = true, onClick = onQuick) }
+        Spacer(Modifier.size(8.dp))
         StaggerIn(3) { MenuItemCard(Icons.Filled.Tune, BlueC, s.customScan, s.customScanDesc, active = true, onClick = onCustom) }
+        Spacer(Modifier.size(8.dp))
         StaggerIn(4) { MenuItemCard(Icons.Filled.CheckCircle, OrangeC, s.testIps, s.testIpsDesc, active = true, onClick = onTest) }
+        Spacer(Modifier.size(8.dp))
         StaggerIn(5) { MenuItemCard(Icons.Filled.Place, Teal, s.discoverColos, s.discoverColosDesc, active = true, onClick = onDiscover) }
+        Spacer(Modifier.size(8.dp))
+        StaggerIn(6) { MenuItemCard(Icons.Filled.Dns, GoldC, s.dnsTool, s.dnsToolDesc, active = true, onClick = onDns) }
 
         Spacer(Modifier.size(16.dp))
 
@@ -121,7 +138,7 @@ fun HomeScreen(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Send, null, tint = BlueC, modifier = Modifier.size(18.dp))
+            Icon(Icons.AutoMirrored.Filled.Send, null, tint = BlueC, modifier = Modifier.size(18.dp))
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(
                     if (lang == Lang.FA) s.telegramChannel else s.telegramChannel.uppercase(),
@@ -138,7 +155,7 @@ fun HomeScreen(
             )
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.size(24.dp))
 
         // ---- Footer ----
         Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {

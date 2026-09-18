@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -102,7 +103,9 @@ fun CyberBackground(animated: Boolean = true, content: @Composable () -> Unit) {
 fun AnimatedGrid(modifier: Modifier = Modifier, animated: Boolean = true) {
     val time by rememberFrameClock(animated)
     Canvas(modifier) {
+        if (size.width <= 0f || size.height <= 0f) return@Canvas
         val step = 30.dp.toPx()
+        if (step <= 0f) return@Canvas
         val off = (time / 45f) % step
         val line = Accent.copy(alpha = 0.035f)
         var x = -step + off
@@ -116,7 +119,7 @@ fun AnimatedGrid(modifier: Modifier = Modifier, animated: Boolean = true) {
         // Drifting radial glow.
         val gx = size.width * (0.5f + 0.42f * sin(time / 3000f))
         val gy = size.height * (0.42f + 0.32f * cos(time / 3900f))
-        val gr = size.minDimension * 0.55f
+        val gr = (size.minDimension * 0.55f).coerceAtLeast(1f)
         drawCircle(
             brush = Brush.radialGradient(
                 listOf(Accent.copy(alpha = 0.05f), Color.Transparent),
@@ -147,6 +150,7 @@ fun ParticleNetwork(
         }
     }
     Canvas(modifier) {
+        if (size.width <= 0f || size.height <= 0f) return@Canvas
         val t = time / 1000f
         val pts = nodes.map {
             Offset(frac(it.bx + it.vx * t) * size.width, frac(it.by + it.vy * t) * size.height)
@@ -202,7 +206,8 @@ fun RadarSweep(
         }
     }
     Canvas(modifier) {
-        val r = size.minDimension / 2f * 0.92f
+        if (size.width <= 0f || size.height <= 0f) return@Canvas
+        val r = (size.minDimension / 2f * 0.92f).coerceAtLeast(1f)
         val c = center
         // Faint disc.
         drawCircle(
@@ -277,11 +282,12 @@ fun LatencyOscilloscope(
         0f, 1f, infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Reverse), label = "pulse",
     )
     Canvas(modifier) {
+        if (size.width <= 0f || size.height <= 0f) return@Canvas
         val w = size.width
         val h = size.height
         val padT = h * 0.12f
         val padB = h * 0.14f
-        val usable = h - padT - padB
+        val usable = (h - padT - padB).coerceAtLeast(1f)
         val baseY = h - padB
 
         // Grid: horizontal divisions + slowly scrolling verticals.
@@ -290,7 +296,7 @@ fun LatencyOscilloscope(
             val y = padT + usable * i / 4f
             drawLine(grid, Offset(0f, y), Offset(w, y), 1f)
         }
-        val vStep = w / 12f
+        val vStep = (w / 12f).coerceAtLeast(1f)
         var gx = -vStep + sweep * vStep
         while (gx <= w) {
             drawLine(grid, Offset(gx, padT), Offset(gx, baseY), 1f)
@@ -379,8 +385,9 @@ fun NeonProgressBar(
         0f, 1f, infiniteRepeatable(tween(1300, easing = LinearEasing), RepeatMode.Restart), label = "s",
     )
     Canvas(modifier) {
+        if (size.width <= 0f || size.height <= 0f) return@Canvas
         val h = size.height
-        val radius = h / 2f
+        val radius = (h / 2f).coerceAtLeast(1f)
         // Track.
         drawRoundRect(trackColor, cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius), size = size)
         val w = size.width * p
@@ -456,7 +463,7 @@ fun TypewriterText(
     letterSpacing: TextUnit = 2.sp,
     charDelayMs: Long = 38L,
 ) {
-    var shown by remember(text) { mutableStateOf(0) }
+    var shown by remember(text) { mutableIntStateOf(0) }
     LaunchedEffect(text) {
         shown = 0
         for (i in 1..text.length) {

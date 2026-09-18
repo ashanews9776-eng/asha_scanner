@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "com.ahoura.asha_scanner_ip"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 37
         versionCode = 12
         versionName = "0.8.1"
@@ -19,7 +19,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
     }
 
@@ -27,7 +27,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a")
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
             isUniversalApk = true
         }
     }
@@ -46,7 +46,7 @@ android {
             val alias = System.getenv("KEY_ALIAS") ?: properties.getProperty("key.alias")
             val kPassword = System.getenv("KEY_PASSWORD") ?: properties.getProperty("key.password")
 
-            val keyFile = file(keystorePath)
+            val keyFile = file(keystorePath).let { if (it.exists()) it else rootProject.file(keystorePath) }
             if (keyFile.exists() && keystorePassword != null && alias != null && kPassword != null) {
                 storeFile = keyFile
                 storePassword = keystorePassword
@@ -80,6 +80,11 @@ android {
         compose = true
         buildConfig = true
     }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 dependencies {
@@ -99,6 +104,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.lottie.compose)
     testImplementation(libs.junit)
+    testImplementation(libs.org.json)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

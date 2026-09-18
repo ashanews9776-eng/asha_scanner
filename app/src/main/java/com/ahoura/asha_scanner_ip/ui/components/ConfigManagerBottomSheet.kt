@@ -30,6 +30,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -80,8 +81,12 @@ fun ConfigManagerBottomSheet(
     val activeProfile by vm.activeProfile.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var addMode by remember { mutableIntStateOf(0) } // 0 = Link, 1 = StormDNS Manual
     var inputLink by remember { mutableStateOf("") }
     var inputName by remember { mutableStateOf("") }
+    var stormDomain by remember { mutableStateOf("") }
+    var stormKey by remember { mutableStateOf("") }
+    var stormMethod by remember { mutableStateOf("1") }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -140,66 +145,181 @@ fun ConfigManagerBottomSheet(
             if (showAddDialog) {
                 CyberCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(4.dp)) {
+                        // Mode Selector Tabs
                         Row(
                             Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                s.importConfig,
-                                color = Accent,
-                                fontFamily = displayFamily(lang),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Row(
+                            val tab0 = addMode == 0
+                            Box(
                                 Modifier
+                                    .weight(1f)
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(BlueC.copy(alpha = 0.1f))
-                                    .clickable {
-                                        clipboard.getText()?.text?.let { inputLink = it }
-                                    }
-                                    .padding(horizontal = 6.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .background(if (tab0) AccentMuted else SurfaceC)
+                                    .border(0.5.dp, if (tab0) AccentBorder else BorderC, RoundedCornerShape(4.dp))
+                                    .clickable { addMode = 0 }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Filled.ContentPaste, null, tint = BlueC, modifier = Modifier.size(12.dp))
-                                Spacer(Modifier.size(4.dp))
                                 Text(
-                                    if (fa) "چسباندن" else "PASTE",
-                                    color = BlueC,
-                                    fontFamily = ShareTechMono,
-                                    fontSize = 10.sp
+                                    if (fa) "🔗 لینک اشتراک" else "🔗 SHARE LINK",
+                                    color = if (tab0) Accent else TextSecondaryC,
+                                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (tab0) FontWeight.Bold else FontWeight.Normal,
+                                )
+                            }
+
+                            val tab1 = addMode == 1
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (tab1) AccentMuted else SurfaceC)
+                                    .border(0.5.dp, if (tab1) AccentBorder else BorderC, RoundedCornerShape(4.dp))
+                                    .clickable { addMode = 1 }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    if (fa) "⚡ تنظیم StormDNS" else "⚡ STORMDNS MANUAL",
+                                    color = if (tab1) Accent else TextSecondaryC,
+                                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (tab1) FontWeight.Bold else FontWeight.Normal,
                                 )
                             }
                         }
-                        Spacer(Modifier.size(8.dp))
-                        KvInput(
-                            label = "link",
-                            value = inputLink,
-                            onValueChange = { inputLink = it },
-                            placeholder = s.pasteConfigPrompt,
-                        )
-                        Spacer(Modifier.size(6.dp))
-                        KvInput(
-                            label = "name",
-                            value = inputName,
-                            onValueChange = { inputName = it },
-                            placeholder = if (fa) "نام دلخواه (اختیاری)" else "Profile Name (Optional)",
-                        )
+
                         Spacer(Modifier.size(10.dp))
-                        val isValid = ProxyParser.isSupported(inputLink)
-                        ScanButton(
-                            text = "✓  ${s.saveConfig}",
-                            active = isValid,
-                            onClick = {
-                                if (isValid) {
-                                    vm.addProfile(inputLink, inputName.ifBlank { null })
-                                    inputLink = ""
-                                    inputName = ""
-                                    showAddDialog = false
+
+                        if (addMode == 0) {
+                            // Mode 0: Paste share link (vless / trojan / stormdns)
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    if (fa) "پشتیبانی از vless، trojan و stormdns" else "Supports vless://, trojan://, stormdns://",
+                                    color = TextMutedC,
+                                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                    fontSize = 10.sp,
+                                )
+                                Row(
+                                    Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(BlueC.copy(alpha = 0.1f))
+                                        .clickable {
+                                            clipboard.getText()?.text?.let { inputLink = it }
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Filled.ContentPaste, null, tint = BlueC, modifier = Modifier.size(12.dp))
+                                    Spacer(Modifier.size(4.dp))
+                                    Text(
+                                        if (fa) "چسباندن" else "PASTE",
+                                        color = BlueC,
+                                        fontFamily = ShareTechMono,
+                                        fontSize = 10.sp
+                                    )
                                 }
                             }
-                        )
+                            Spacer(Modifier.size(6.dp))
+                            KvInput(
+                                label = "link",
+                                value = inputLink,
+                                onValueChange = { inputLink = it },
+                                placeholder = s.pasteConfigPrompt,
+                            )
+                            Spacer(Modifier.size(6.dp))
+                            KvInput(
+                                label = "name",
+                                value = inputName,
+                                onValueChange = { inputName = it },
+                                placeholder = if (fa) "نام دلخواه (اختیاری)" else "Profile Name (Optional)",
+                            )
+                            Spacer(Modifier.size(10.dp))
+                            val isValid = ProxyParser.isSupported(inputLink)
+                            ScanButton(
+                                text = s.saveConfig,
+                                icon = Icons.Filled.Check,
+                                active = isValid,
+                                onClick = {
+                                    if (isValid) {
+                                        vm.addProfile(inputLink, inputName.ifBlank { null })
+                                        inputLink = ""
+                                        inputName = ""
+                                        showAddDialog = false
+                                    }
+                                }
+                            )
+                        } else {
+                            // Mode 1: Manual StormDNS form
+                            Text(
+                                if (fa) "مشخصات سرور DNS Tunnel (StormDNS)" else "StormDNS Server Details",
+                                color = Accent,
+                                fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.size(6.dp))
+                            KvInput(
+                                label = "domain",
+                                value = stormDomain,
+                                onValueChange = { stormDomain = it },
+                                placeholder = "ns1.example.com",
+                            )
+                            Spacer(Modifier.size(6.dp))
+                            KvInput(
+                                label = "key",
+                                value = stormKey,
+                                onValueChange = { stormKey = it },
+                                placeholder = if (fa) "کلید رمزنگاری" else "Encryption Key",
+                            )
+                            Spacer(Modifier.size(6.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Column(Modifier.weight(1f)) {
+                                    KvInput(
+                                        label = "method",
+                                        value = stormMethod,
+                                        onValueChange = { stormMethod = it.filter { c -> c.isDigit() } },
+                                        placeholder = "1 (Default)",
+                                    )
+                                }
+                                Column(Modifier.weight(1.5f)) {
+                                    KvInput(
+                                        label = "name",
+                                        value = inputName,
+                                        onValueChange = { inputName = it },
+                                        placeholder = if (fa) "نام سرور (اختیاری)" else "Name (Optional)",
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.size(10.dp))
+                            val isManualValid = stormDomain.trim().isNotBlank() && stormKey.trim().isNotBlank()
+                            ScanButton(
+                                text = if (fa) "ذخیره کانفیگ StormDNS" else "SAVE STORMDNS PROFILE",
+                                icon = Icons.Filled.Check,
+                                active = isManualValid,
+                                onClick = {
+                                    if (isManualValid) {
+                                        val link = ProxyParser.exportStormDns(
+                                            name = inputName.ifBlank { stormDomain.trim() },
+                                            domain = stormDomain.trim(),
+                                            encryptionKey = stormKey.trim(),
+                                            encryptionMethod = stormMethod.toIntOrNull() ?: 1,
+                                        )
+                                        vm.addProfile(link, inputName.ifBlank { stormDomain.trim() })
+                                        stormDomain = ""
+                                        stormKey = ""
+                                        inputName = ""
+                                        showAddDialog = false
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.size(12.dp))
@@ -299,7 +419,16 @@ private fun ProfileRow(
                     maxLines = 1,
                 )
                 Spacer(Modifier.size(6.dp))
-                Pill(profile.proxy.protocol.scheme.uppercase())
+                val tag = if (profile.proxy.protocol == com.ahoura.asha_scanner_ip.core.model.Protocol.STORMDNS) "DNS TUNNEL" else profile.proxy.protocol.scheme.uppercase()
+                Pill(tag)
+                if (profile.proxy.fingerprint.isNotBlank()) {
+                    Spacer(Modifier.size(4.dp))
+                    Pill(profile.proxy.fingerprint)
+                }
+                if (profile.proxy.dialMode.isNotBlank()) {
+                    Spacer(Modifier.size(4.dp))
+                    Pill(profile.proxy.dialMode.uppercase())
+                }
             }
             Spacer(Modifier.size(2.dp))
             Text(

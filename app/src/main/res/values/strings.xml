@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">Asha Scanner</string>
+    <string name="vpn_tile_label">Asha VPN</string>
+    <string name="vpn_connected">Connected</string>
+    <string name="vpn_disconnected">Disconnected</string>
+    <string name="vpn_connecting">Connecting…</string>
 </resources>

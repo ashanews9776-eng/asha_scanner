@@ -22,11 +22,46 @@
 # explicitly so debug-info-free internals don't trip strict configs).
 -dontwarn kotlinx.coroutines.**
 
-# libv2ray (Gomobile Xray Core)
--keep class libv2ray.** { *; }
--keep interface libv2ray.** { *; }
+# ── Asha Guard Anti-Censorship VPN Engine & JNI ─────────────────────────────
+-keep class com.ahoura.asha_scanner_ip.core.guard.** { *; }
+-keep interface com.ahoura.asha_scanner_ip.core.guard.** { *; }
+-keepclassmembers class com.ahoura.asha_scanner_ip.core.guard.** { *; }
+-dontwarn com.ahoura.asha_scanner_ip.core.guard.**
+# NativeCore stays at this legacy package: libaether_jni.so exports
+# Java_com_msnguard_vpn_NativeCore_* symbols, so the class name is load-bearing.
+-keep class com.msnguard.vpn.** { *; }
+-keepclassmembers class com.msnguard.vpn.** { *; }
+-dontwarn com.msnguard.vpn.**
+
+# ── Psiphon Tunnel (libgojni.so) & Tun2Socks ─────────────────────────────────
+-keep class ca.psiphon.** { *; }
+-keep interface ca.psiphon.** { *; }
+-keepclassmembers class ca.psiphon.** { *; }
+-keep class psi.** { *; }
+-keep interface psi.** { *; }
+-keepclassmembers class psi.** { *; }
 -keep class go.** { *; }
 -keep interface go.** { *; }
--dontwarn libv2ray.**
+-keepclassmembers class go.** { *; }
+-dontwarn ca.psiphon.**
+-dontwarn psi.**
 -dontwarn go.**
 
+# ── Asha VPN Core, Scanners, & Process Managers ──────────────────────────────
+-keep class com.ahoura.asha_scanner_ip.AshaApplication { *; }
+-keep class com.ahoura.asha_scanner_ip.core.vpn.** { *; }
+-keep interface com.ahoura.asha_scanner_ip.core.vpn.** { *; }
+-keepclassmembers class com.ahoura.asha_scanner_ip.core.vpn.** { *; }
+-keep class com.ahoura.asha_scanner_ip.core.storm.** { *; }
+-keep class com.ahoura.asha_scanner_ip.core.validator.** { *; }
+
+# ── Preserve ALL native JNI methods across all classes ───────────────────────
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# ── Keep methods called by native C++ code (aether_jni.cpp) ───────────────────
+-keepclassmembers class * extends android.net.VpnService {
+    public boolean protectSocket(int);
+    public void onEvent(java.lang.String);
+}

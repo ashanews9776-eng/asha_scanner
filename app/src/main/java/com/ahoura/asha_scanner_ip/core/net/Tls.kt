@@ -75,7 +75,7 @@ object Tls {
         if (sni.isNotBlank() && !isIpLiteral(sni)) {
             params.serverNames = listOf(SNIHostName(sni))
         }
-        if (alpn.isNotEmpty()) {
+        if (alpn.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             params.applicationProtocols = alpn.toTypedArray()
         }
         ssl.sslParameters = params

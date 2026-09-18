@@ -17,13 +17,21 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.ui.window.Dialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -49,7 +57,9 @@ import com.ahoura.asha_scanner_ip.core.output.Exporter
 import com.ahoura.asha_scanner_ip.ui.ScanViewModel
 import com.ahoura.asha_scanner_ip.ui.components.ColoBadge
 import com.ahoura.asha_scanner_ip.ui.components.CyberAppBar
+import com.ahoura.asha_scanner_ip.ui.components.CyberCard
 import com.ahoura.asha_scanner_ip.ui.components.LottieSonar
+import com.ahoura.asha_scanner_ip.ui.components.Pill
 import com.ahoura.asha_scanner_ip.ui.components.ScanButton
 import com.ahoura.asha_scanner_ip.ui.components.StaggerIn
 import com.ahoura.asha_scanner_ip.ui.components.TracerouteDialog
@@ -72,6 +82,7 @@ import com.ahoura.asha_scanner_ip.ui.theme.TextFadedC
 import com.ahoura.asha_scanner_ip.ui.theme.TextMutedC
 import com.ahoura.asha_scanner_ip.ui.theme.TextPrimaryC
 import com.ahoura.asha_scanner_ip.ui.theme.TextSecondaryC
+import com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn
 import com.ahoura.asha_scanner_ip.ui.theme.displayFamily
 import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
 
@@ -81,6 +92,7 @@ fun ResultsScreen(
     onAgain: () -> Unit,
     onBack: () -> Unit,
     onConnectVpn: ((cleanIp: String) -> Unit)? = null,
+    onOpenVpn: (() -> Unit)? = null,
 ) {
     val state by vm.state.collectAsState()
     val context = LocalContext.current
@@ -94,6 +106,7 @@ fun ResultsScreen(
     val lang = LocalLang.current
     var snack by remember { mutableStateOf<String?>(null) }
     var traceResult by remember { mutableStateOf<ScanResult?>(null) }
+    var actionResult by remember { mutableStateOf<ScanResult?>(null) }
     var showLegend by remember { mutableStateOf(false) }
 
     LaunchedEffect(snack) { if (snack != null) { kotlinx.coroutines.delay(1800); snack = null } }
@@ -154,28 +167,45 @@ fun ResultsScreen(
                 }
 
                 // ---- One-Tap Connect with Best Clean IP ----
-                if (results.isNotEmpty() && onConnectVpn != null) {
-                    val bestIp = results.first().ip
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(AccentMuted)
-                            .border(1.dp, AccentBorder, RoundedCornerShape(6.dp))
-                            .clickable { onConnectVpn(bestIp) }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("⚡", fontSize = 14.sp)
-                            androidx.compose.foundation.layout.Spacer(Modifier.size(6.dp))
-                            Text(
-                                "${s.connectWithCleanIp} ($bestIp)",
-                                color = Accent,
-                                fontFamily = if (lang == Lang.FA) com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn else ShareTechMono,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                            )
+                if (results.isNotEmpty()) {
+                    val best = results.first()
+                    val bestIp = best.ip
+                    CyberCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(4.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("⚡", fontSize = 14.sp)
+                                    Spacer(Modifier.size(6.dp))
+                                    Text(
+                                        "${s.connectWithCleanIp}: $bestIp",
+                                        color = Accent,
+                                        fontFamily = displayFamily(lang),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                    )
+                                }
+                                Pill("${best.avgLatencyMs.toInt()}ms")
+                            }
+                            Spacer(Modifier.size(8.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                ActionBtn("WARP (WG)", Accent, AccentMuted, AccentBorder, Modifier.weight(1f)) {
+                                    vm.connectWithScannedIpAsWarp(context, best.ip, best.port, "wireguard")
+                                    onOpenVpn?.invoke()
+                                }
+                                ActionBtn("MASQUE", BlueC, BlueC.copy(alpha = 0.08f), BlueC.copy(alpha = 0.4f), Modifier.weight(1f)) {
+                                    vm.connectWithScannedIpAsWarp(context, best.ip, best.port, "masque")
+                                    onOpenVpn?.invoke()
+                                }
+                                if (proxy != null && onConnectVpn != null) {
+                                    ActionBtn("CUSTOM", GoldC, GoldC.copy(alpha = 0.08f), GoldC.copy(alpha = 0.4f), Modifier.weight(1f)) {
+                                        onConnectVpn(bestIp)
+                                    }
+                                }
+                            }
                         }
                     }
                     Spacer8()
@@ -264,7 +294,7 @@ fun ResultsScreen(
                             rank = rank,
                             r = r,
                             hasConfig = proxy != null,
-                            onTrace = { traceResult = r },
+                            onAction = { actionResult = r },
                             onGradeClick = { showLegend = true },
                             onCopy = {
                                 if (proxy != null) {
@@ -281,12 +311,55 @@ fun ResultsScreen(
             }
 
             Column(Modifier.padding(12.dp)) {
-                ScanButton(text = "↻  ${s.scanAgain}", onClick = onAgain)
+                ScanButton(text = s.scanAgain, icon = Icons.Filled.Refresh, onClick = onAgain)
             }
         }
 
         traceResult?.let { r ->
             TracerouteDialog(ip = r.ip, colo = r.colo, onDismiss = { traceResult = null })
+        }
+
+        actionResult?.let { r ->
+            CleanIpActionDialog(
+                r = r,
+                hasConfig = proxy != null,
+                onConnectWarp = {
+                    vm.connectWithScannedIpAsWarp(context, r.ip, r.port, "wireguard")
+                    actionResult = null
+                    onOpenVpn?.invoke()
+                },
+                onConnectMasque = {
+                    vm.connectWithScannedIpAsWarp(context, r.ip, r.port, "masque")
+                    actionResult = null
+                    onOpenVpn?.invoke()
+                },
+                onConnectCustom = if (proxy != null && onConnectVpn != null) {
+                    {
+                        actionResult = null
+                        onConnectVpn(r.ip)
+                    }
+                } else null,
+                onPinEndpoint = {
+                    vm.setManualEndpoint("${r.ip}:${r.port}")
+                    snack = s.endpointPinnedSuccess
+                    actionResult = null
+                },
+                onTrace = {
+                    actionResult = null
+                    traceResult = r
+                },
+                onCopy = {
+                    if (proxy != null) {
+                        clipboard.setText(AnnotatedString(ConfigLinkBuilder.withAddress(proxy, r.ip, r.port)))
+                        snack = s.copiedConfigFor.format(r.ip)
+                    } else {
+                        clipboard.setText(AnnotatedString(r.ip))
+                        snack = s.copiedIp.format(r.ip)
+                    }
+                    actionResult = null
+                },
+                onDismiss = { actionResult = null }
+            )
         }
 
         // ---- Snackbar overlay ----
@@ -324,7 +397,7 @@ private fun ResultRowFull(
     rank: Int,
     r: ScanResult,
     hasConfig: Boolean,
-    onTrace: () -> Unit,
+    onAction: () -> Unit,
     onGradeClick: () -> Unit,
     onCopy: () -> Unit
 ) {
@@ -339,7 +412,7 @@ private fun ResultRowFull(
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(5.dp)).background(SurfaceC)
             .border(0.5.dp, BorderC, RoundedCornerShape(5.dp))
-            .clickable(onClick = onTrace)
+            .clickable(onClick = onAction)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -503,3 +576,168 @@ private fun GradeLegend() {
         }
     }
 }
+
+@Composable
+private fun CleanIpActionDialog(
+    r: ScanResult,
+    hasConfig: Boolean,
+    onConnectWarp: () -> Unit,
+    onConnectMasque: () -> Unit,
+    onConnectCustom: (() -> Unit)?,
+    onPinEndpoint: () -> Unit,
+    onTrace: () -> Unit,
+    onCopy: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val s = LocalStrings.current
+    val lang = LocalLang.current
+    val fa = lang == Lang.FA
+
+    Dialog(onDismissRequest = onDismiss) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(SurfaceC)
+                .border(1.dp, BorderC, RoundedCornerShape(8.dp))
+                .padding(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Header
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "⚡ ${r.ip}:${r.port}",
+                                color = Accent,
+                                fontFamily = ShareTechMono,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Spacer(Modifier.size(6.dp))
+                            Pill(r.colo ?: "CF")
+                        }
+                        Text(
+                            "${r.avgLatencyMs.toInt()}ms | loss ${(r.loss * 100).toInt()}%",
+                            color = TextSecondaryC,
+                            fontFamily = ShareTechMono,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Icon(
+                        Icons.Filled.Close,
+                        null,
+                        tint = TextMutedC,
+                        modifier = Modifier.size(20.dp).clickable { onDismiss() }
+                    )
+                }
+
+                Spacer(Modifier.size(4.dp))
+
+                // Action items
+                ActionDialogItem(
+                    icon = Icons.Filled.Bolt,
+                    iconTint = Accent,
+                    title = s.connectWarp,
+                    subtitle = "WireGuard Tunnel",
+                    onClick = onConnectWarp
+                )
+
+                ActionDialogItem(
+                    icon = Icons.Filled.Shield,
+                    iconTint = BlueC,
+                    title = s.connectMasque,
+                    subtitle = "HTTP/3 CONNECT-IP",
+                    onClick = onConnectMasque
+                )
+
+                if (hasConfig && onConnectCustom != null) {
+                    ActionDialogItem(
+                        icon = Icons.Filled.VpnKey,
+                        iconTint = GoldC,
+                        title = s.connectCustom,
+                        subtitle = "VLESS / Trojan / StormDNS",
+                        onClick = onConnectCustom
+                    )
+                }
+
+                ActionDialogItem(
+                    icon = Icons.Filled.PushPin,
+                    iconTint = AccentDim,
+                    title = s.pinAsWarpEndpoint,
+                    subtitle = "Save as Cloudflare manual endpoint",
+                    onClick = onPinEndpoint
+                )
+
+                ActionDialogItem(
+                    icon = Icons.Filled.Speed,
+                    iconTint = TextSecondaryC,
+                    title = "Traceroute",
+                    subtitle = "Inspect hop latency and BGP route",
+                    onClick = onTrace
+                )
+
+                ActionDialogItem(
+                    icon = Icons.Filled.ContentCopy,
+                    iconTint = TextMutedC,
+                    title = s.copy,
+                    subtitle = if (hasConfig) "Config link" else "IP address",
+                    onClick = onCopy
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionDialogItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    val lang = LocalLang.current
+    val fa = lang == Lang.FA
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(SurfaceC)
+            .border(0.5.dp, BorderC, RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(iconTint.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, null, tint = iconTint, modifier = Modifier.size(16.dp))
+        }
+        Spacer(Modifier.size(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                color = TextPrimaryC,
+                fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp
+            )
+            Text(
+                subtitle,
+                color = TextMutedC,
+                fontFamily = ShareTechMono,
+                fontSize = 9.sp
+            )
+        }
+    }
+}
+
