@@ -140,7 +140,7 @@ fun CustomScanScreen(vm: ScanViewModel, onBack: () -> Unit, onStart: () -> Unit)
             Spacer(Modifier.size(6.dp))
         }
         Column(Modifier.padding(12.dp)) {
-            ScanButton(text = "▶  ${s.startScan}", icon = Icons.Filled.PlayArrow, onClick = onStart)
+            ScanButton(text = s.startScan, icon = Icons.Filled.PlayArrow, onClick = onStart)
         }
     }
 }

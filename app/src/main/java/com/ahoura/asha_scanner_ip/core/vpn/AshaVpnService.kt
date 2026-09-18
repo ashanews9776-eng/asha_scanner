@@ -1,25 +1,19 @@
 package com.ahoura.asha_scanner_ip.core.vpn
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
-import android.os.Build
 import android.os.ParcelFileDescriptor
-import androidx.core.app.NotificationCompat
-import com.ahoura.asha_scanner_ip.MainActivity
-import com.ahoura.asha_scanner_ip.R
+import com.ahoura.asha_scanner_ip.core.model.Protocol
 import com.ahoura.asha_scanner_ip.core.model.ProxyConfig
-import com.ahoura.asha_scanner_ip.core.net.Tls
 import com.ahoura.asha_scanner_ip.core.parser.ProxyParser
+import com.ahoura.asha_scanner_ip.core.storm.StormDnsProcessManager
 import com.ahoura.asha_scanner_ip.core.validator.XrayConfigBuilder
+import com.ahoura.asha_scanner_ip.core.validator.XrayProcessManager
 import com.ahoura.asha_scanner_ip.data.SettingsStore
-import libv2ray.CoreCallbackHandler
-import libv2ray.CoreController
-import libv2ray.Libv2ray
+import com.ahoura.asha_scanner_ip.core.guard.CoreConfig
+import com.ahoura.asha_scanner_ip.core.guard.GuardVpnService
+import com.ahoura.asha_scanner_ip.core.guard.Tun2SocksManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,9 +21,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.net.Socket
 
-class AshaVpnService : VpnService(), CoreCallbackHandler {
+/**
+ * Unified VPN Service: inherits all anti-censorship transports from [GuardVpnService]
+ * (WireGuard, MASQUE, WARP-on-WARP, Psiphon, Tor, SHARD), while providing full support
+ * for scanned custom proxy profiles (VLESS, Trojan, StormDNS, CottenDNS) via standalone
+ * Xray core and badvpn tun2socks.
+ */
+class AshaVpnService : GuardVpnService() {
 
     companion object {
         const val ACTION_START = "com.ahoura.asha_scanner_ip.vpn.START"
@@ -37,87 +36,120 @@ class AshaVpnService : VpnService(), CoreCallbackHandler {
         const val EXTRA_RAW_CONFIG = "extra_raw_config"
         const val EXTRA_CLEAN_IP = "extra_clean_ip"
         const val EXTRA_PROFILE_NAME = "extra_profile_name"
-        const val NOTIFICATION_ID = 1001
-        const val CHANNEL_ID = "asha_vpn_channel"
+        const val EXTRA_TRANSPORT = "extra_transport"
     }
 
-    private var vpnInterface: ParcelFileDescriptor? = null
-    private var coreController: CoreController? = null
-    private val scope = CoroutineScope(Dispatchers.IO + Job())
-    private var timerJob: Job? = null
-    private var pingJob: Job? = null
-    private var connectedStartMs: Long = 0L
+    private var customVpnInterface: ParcelFileDescriptor? = null
+    private val stormDnsManager by lazy { StormDnsProcessManager(applicationContext) }
+    private val customScope = CoroutineScope(Dispatchers.IO + Job())
+    private var customTimerJob: Job? = null
+    private var customPingJob: Job? = null
+    private var customConnectedStartMs: Long = 0L
 
     @Volatile
-    private var isStopping = false
-
-    override fun onEmitStatus(status: Long, msg: String?): Long {
-        // AndroidLibXrayLite only routes two informational lifecycle notes
-        // through this hook ("Started successfully, running" / "Core stopped");
-        // the state transitions arrive via startup()/shutdown() and start
-        // failures throw from startLoop(). Nothing to do here.
-        return 0L
-    }
-
-    override fun shutdown(): Long {
-        // The library fires this whenever the core instance stops. If WE did not
-        // initiate the stop (isStopping still false), the core died unexpectedly
-        // — surface it instead of leaving the UI stuck on CONNECTED, then tear
-        // the TUN/service down. Our own stopVpn() flips isStopping first, so the
-        // shutdown() fired by our stopLoop() lands here as a no-op.
-        if (!isStopping) {
-            VpnManager.updateStats {
-                it.copy(status = VpnStatus.ERROR, errorMessage = "Core stopped unexpectedly")
-            }
-            stopVpn()
-        }
-        return 0L
-    }
-
-    override fun startup(): Long {
-        // Authoritative "core is running" signal from the library (called inside
-        // startLoop once the instance started); corroborate the CONNECTED state
-        // that startVpn sets right after startLoop returns.
-        VpnManager.updateStats {
-            if (it.status == VpnStatus.CONNECTING) {
-                it.copy(status = VpnStatus.CONNECTED, connectedDurationSeconds = 0L, errorMessage = null)
-            } else it
-        }
-        return 0L
-    }
-
-    override fun onCreate() {
-        super.onCreate()
-        createNotificationChannel()
-    }
+    private var isCustomActive = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_START -> {
-                // startForegroundService() obligates this service to reach
-                // startForeground() within seconds — including on the error
-                // paths inside startVpn (blank/invalid config) that stop the
-                // service without connecting. Promote to foreground first, or
-                // Android 12+ throws ForegroundServiceDidNotStartInTimeException.
-                val name = intent.getStringExtra(EXTRA_PROFILE_NAME) ?: "Proxy"
-                startForeground(NOTIFICATION_ID, buildNotification("Connecting to $name...", isConnected = false))
-                startVpn(
-                    rawConfig = intent.getStringExtra(EXTRA_RAW_CONFIG) ?: "",
-                    cleanIp = intent.getStringExtra(EXTRA_CLEAN_IP),
-                    profileName = name,
+        try {
+            when (intent?.action) {
+                ACTION_START -> {
+                    // Immediately satisfy Android's foreground service start requirement
+                    runCatching { startAsForeground() }
+
+                    val transport = intent.getStringExtra(EXTRA_TRANSPORT)?.trim()?.lowercase() ?: "custom"
+                    val rawConfig = intent.getStringExtra(EXTRA_RAW_CONFIG) ?: ""
+                    val cleanIp = intent.getStringExtra(EXTRA_CLEAN_IP)
+                    val profileName = intent.getStringExtra(EXTRA_PROFILE_NAME) ?: "Proxy"
+
+                    if (transport != "custom" && rawConfig.isBlank()) {
+                        // Asha Guard transport: wireguard, masque, gool, psiphon, tor, shard
+                        stopCustomVpn()
+                        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+                        prefs.edit().putString("default_protocol", transport).apply()
+                        val armed = prefs.getBoolean("chain_armed", true)
+                        val effectiveProto = if (transport == "psiphon" && armed) {
+                            GuardVpnService.CHAIN_PROTOCOL_MARKER.lowercase()
+                        } else {
+                            transport
+                        }
+
+                        // Configure Aether environment variables (Upstream Proxy & WARP-on-WARP hops)
+                        val upstream = prefs.getString("upstream_proxy", null)?.trim().orEmpty()
+                        if (upstream.isNotBlank()) {
+                            runCatching { android.system.Os.setenv("AETHER_UPSTREAM", upstream, true) }
+                        } else {
+                            runCatching { android.system.Os.unsetenv("AETHER_UPSTREAM") }
+                        }
+
+                        val wiwOuter = prefs.getString("wiw_outer", null)?.trim().orEmpty()
+                        val wiwInner = prefs.getString("wiw_inner", null)?.trim().orEmpty()
+                        if (wiwOuter.isNotBlank()) {
+                            runCatching { android.system.Os.setenv("AETHER_WIW_OUTER_PEER", wiwOuter, true) }
+                        } else {
+                            runCatching { android.system.Os.unsetenv("AETHER_WIW_OUTER_PEER") }
+                        }
+                        if (wiwInner.isNotBlank()) {
+                            runCatching { android.system.Os.setenv("AETHER_WIW_INNER_PEER", wiwInner, true) }
+                        } else {
+                            runCatching { android.system.Os.unsetenv("AETHER_WIW_INNER_PEER") }
+                        }
+
+                        val tunnelIntent = Intent(this, AshaVpnService::class.java).apply {
+                            action = ACTION_CONNECT
+                            val config = CoreConfig.json(this@AshaVpnService, effectiveProto)
+                            putExtra(EXTRA_CONFIG, config)
+                        }
+                        return super.onStartCommand(tunnelIntent, flags, startId)
+                    } else {
+                        // Custom scanned profile (VLESS/Trojan/StormDNS). The
+                        // disconnect must NOT stopSelf the service — a custom
+                        // session starts immediately after and would be killed
+                        // with it (the "connects then instantly disconnects" bug).
+                        val stopTunnelIntent = Intent(this, AshaVpnService::class.java).apply {
+                            action = ACTION_DISCONNECT
+                            putExtra(EXTRA_KEEP_SERVICE, true)
+                        }
+                        super.onStartCommand(stopTunnelIntent, flags, startId)
+                        startCustomVpn(rawConfig, cleanIp, profileName)
+                        return START_NOT_STICKY
+                    }
+                }
+                ACTION_STOP -> {
+                    stopCustomVpn()
+                    val stopTunnelIntent = Intent(this, AshaVpnService::class.java).apply {
+                        action = ACTION_DISCONNECT
+                    }
+                    super.onStartCommand(stopTunnelIntent, flags, startId)
+                    return START_NOT_STICKY
+                }
+                ACTION_CONNECT -> {
+                    stopCustomVpn()
+                    return super.onStartCommand(intent, flags, startId)
+                }
+                ACTION_DISCONNECT -> {
+                    stopCustomVpn()
+                    return super.onStartCommand(intent, flags, startId)
+                }
+                else -> {
+                    return super.onStartCommand(intent, flags, startId)
+                }
+            }
+        } catch (t: Throwable) {
+            android.util.Log.e("AshaVpnService", "Fatal error in onStartCommand", t)
+            VpnManager.updateStats {
+                it.copy(
+                    status = VpnStatus.ERROR,
+                    errorMessage = "Error: ${t.javaClass.simpleName}: ${t.message ?: "Unknown error"}",
+                    detailMessage = t.stackTraceToString()
                 )
             }
-            ACTION_STOP -> {
-                stopVpn()
-            }
+            return START_NOT_STICKY
         }
-        return START_NOT_STICKY
     }
 
-    private fun startVpn(rawConfig: String, cleanIp: String?, profileName: String) {
-        isStopping = false
+    private fun startCustomVpn(rawConfig: String, cleanIp: String?, profileName: String) {
         if (rawConfig.isBlank()) {
-            stopVpn()
+            stopCustomVpn()
             return
         }
 
@@ -126,10 +158,11 @@ class AshaVpnService : VpnService(), CoreCallbackHandler {
             VpnManager.updateStats {
                 it.copy(status = VpnStatus.ERROR, errorMessage = "Failed to parse proxy configuration")
             }
-            stopVpn()
+            stopCustomVpn()
             return
         }
 
+        sendStatus(STATUS_CONNECTING, "Connecting $profileName...")
         VpnManager.updateStats {
             it.copy(
                 status = VpnStatus.CONNECTING,
@@ -142,238 +175,183 @@ class AshaVpnService : VpnService(), CoreCallbackHandler {
                 )
             )
         }
-        // Foreground promotion already happened in onStartCommand.
 
-        scope.launch {
+        customScope.launch {
             try {
-                // Unpack the bundled geo assets (needed when the bypass-Iran
-                // routing rules reference geosite:ir / geoip:ir).
-                unpackGeoAssets(applicationContext)
+                // If StormDNS or CottenDNS, start the native DNS tunnel client
+                if (proxy.protocol == Protocol.STORMDNS) {
+                    val isCotten = proxy.isCottenDns()
+                    val engine = proxy.dnsEngine()
+                    val engineName = if (isCotten) "CottenDNS" else "StormDNS"
 
-                // Clear any bad xudp.basekey from previous process run
-                runCatching { android.system.Os.unsetenv("xray.xudp.basekey") }
+                    val customText = runCatching { SettingsStore(applicationContext).customDnsResolvers.first() }.getOrDefault("")
+                    val defaultLines = runCatching {
+                        applicationContext.assets.open("default_resolvers.txt").bufferedReader().useLines { it.toList() }
+                    }.getOrDefault(emptyList())
+                    val curatedLines = runCatching {
+                        applicationContext.assets.open("dns_resolvers.txt").bufferedReader().useLines { it.toList() }
+                    }.getOrDefault(emptyList())
+                    val allLines = defaultLines + curatedLines + customText.lines()
+                    val resolverIps = allLines.mapNotNull { com.ahoura.asha_scanner_ip.core.dns.DnsProbe.parseResolverLine(it)?.ip }.distinct()
 
-                // Initialize core environment with asset path; pass empty string for xudpBaseKey
-                val filesPath = applicationContext.filesDir.absolutePath
-                Libv2ray.initCoreEnv(filesPath, "")
-                coreController = Libv2ray.newCoreController(this@AshaVpnService)
+                    stormDnsManager.start(
+                        domain = proxy.address,
+                        encryptionKey = proxy.password,
+                        encryptionMethod = proxy.encryption.toIntOrNull() ?: 1,
+                        resolverIps = resolverIps,
+                        engine = engine,
+                    )
+                    val ready = stormDnsManager.waitForPort(timeoutMillis = 35_000)
+                    if (!ready) {
+                        val reason = stormDnsManager.lastError ?: "failed to connect to resolvers (check server domain & key)"
+                        throw IllegalStateException("$engineName: $reason")
+                    }
+                }
 
-                // Build client JSON config
                 val bypassIran = runCatching {
                     SettingsStore(applicationContext).vpnBypassIr.first()
                 }.getOrDefault(true)
-                val configJson = XrayConfigBuilder.buildClientVpnJson(proxy, cleanIp, bypassIran = bypassIran)
+                val dnsIp = runCatching {
+                    SettingsStore(applicationContext).vpnDnsIp.first().trim()
+                }.getOrDefault("1.1.1.1").let { raw ->
+                    if (raw.matches(Regex("[0-9.]+")) || raw.matches(Regex("[0-9a-fA-F:]+"))) raw else "1.1.1.1"
+                }
+
+                val socksPort = XrayProcessManager.DEFAULT_SOCKS_PORT
+                val httpPort = XrayProcessManager.DEFAULT_HTTP_PORT
+                val configJson = XrayConfigBuilder.buildClientVpnJson(
+                    proxy = proxy,
+                    candidateIp = cleanIp,
+                    socksPort = socksPort,
+                    httpPort = httpPort,
+                    bypassIran = bypassIran,
+                    dnsServers = listOf(dnsIp, "8.8.8.8"),
+                    includeTun = false,
+                )
+
+                val started = XrayProcessManager.start(applicationContext, configJson, socksPort)
+                if (!started) {
+                    throw IllegalStateException("Failed to start Xray core: ${XrayProcessManager.lastError}")
+                }
 
                 // Establish TUN interface
                 val builder = Builder()
                     .setSession("Asha VPN - $profileName")
                     .setMtu(1500)
-                    .addAddress("172.19.0.1", 30)
-                    .addDnsServer("1.1.1.1")
-                    .addDnsServer("8.8.8.8")
-                    .addRoute("0.0.0.0", 0)
 
-                // Disallow self package to prevent routing loop for Xray outbound sockets
-                runCatching {
-                    builder.addDisallowedApplication(packageName)
+                val privateAddr = Tun2SocksManager.selectPrivateAddress()
+                builder.addAddress(privateAddr.ipAddress, privateAddr.prefixLength)
+                builder.addDnsServer(dnsIp)
+                builder.addDnsServer("8.8.8.8")
+                builder.addRoute("0.0.0.0", 0)
+                builder.setBlocking(false)
+                runCatching { builder.addDisallowedApplication(packageName) }
+
+                val pfd = builder.establish() ?: throw IllegalStateException("VPN Builder.establish() returned null")
+                customVpnInterface = pfd
+
+                // Bridge TUN to SOCKS5 via badvpn tun2socks
+                val bridged = Tun2SocksManager.start(pfd, socksPort)
+                if (!bridged) {
+                    throw IllegalStateException("Failed to bridge TUN to SOCKS5 via tun2socks")
                 }
 
-                runCatching {
-                    builder.addAddress("fdfe:dcba:9876::1", 126)
-                    builder.addRoute("::", 0)
-                }
-
-                vpnInterface = builder.establish()
-                val fd = vpnInterface?.fd ?: throw IllegalStateException("Failed to establish VPN TUN interface")
-
-                // Start Xray-core with the TUN interface file descriptor
-                coreController?.startLoop(configJson, fd)
-
-                connectedStartMs = System.currentTimeMillis()
+                isCustomActive = true
+                customConnectedStartMs = System.currentTimeMillis()
+                sendStatus(STATUS_CONNECTED, profileName)
                 VpnManager.updateStats {
-                    it.copy(status = VpnStatus.CONNECTED, connectedDurationSeconds = 0L, errorMessage = null)
+                    it.copy(
+                        status = VpnStatus.CONNECTED,
+                        connectedDurationSeconds = 0L,
+                        errorMessage = null,
+                    )
                 }
-                updateNotification("Connected: $profileName", isConnected = true)
 
-                val target = cleanIp?.ifBlank { null } ?: proxy.address
-                startTimer()
-                startPeriodicPing(proxy, target)
+                startCustomTimer()
+                startCustomPing(proxy, cleanIp)
 
             } catch (e: Exception) {
+                val err = e.message ?: "Connection failed"
+                sendStatus(STATUS_FAILED, err)
                 VpnManager.updateStats {
-                    it.copy(status = VpnStatus.ERROR, errorMessage = e.message ?: "Connection failed")
+                    it.copy(status = VpnStatus.ERROR, errorMessage = err)
                 }
-                stopVpn()
+                stopCustomVpn()
             }
         }
     }
 
-    private fun startTimer() {
-        timerJob?.cancel()
-        timerJob = scope.launch {
-            while (isActive) {
+    private fun startCustomTimer() {
+        customTimerJob?.cancel()
+        customTimerJob = customScope.launch {
+            while (isActive && isCustomActive) {
                 delay(1000)
-                val duration = (System.currentTimeMillis() - connectedStartMs) / 1000
-                // queryAllOutboundTrafficStats drains (resets) the core's
-                // per-outbound counters, so each read is the last second's
-                // bytes — a live up/down rate. Summed across all outbounds
-                // (proxy + direct) so bypassed Iranian traffic counts too.
-                val raw = runCatching { coreController?.queryAllOutboundTrafficStats() }.getOrNull().orEmpty()
-                var upBps = 0L
-                var downBps = 0L
-                for (entry in raw.split(';')) {
-                    val parts = entry.split(',')
-                    if (parts.size != 3) continue
-                    val v = parts[2].toLongOrNull() ?: continue
-                    when (parts[1]) {
-                        "uplink" -> upBps += v
-                        "downlink" -> downBps += v
+                if (!XrayProcessManager.isRunning || !Tun2SocksManager.isRunning) {
+                    val err = XrayProcessManager.lastError.ifBlank { "VPN engine process exited unexpectedly" }
+                    sendStatus(STATUS_FAILED, err)
+                    VpnManager.updateStats {
+                        it.copy(status = VpnStatus.ERROR, errorMessage = err)
                     }
+                    stopCustomVpn()
+                    break
                 }
+                val duration = (System.currentTimeMillis() - customConnectedStartMs) / 1000
                 VpnManager.updateStats {
-                    it.copy(connectedDurationSeconds = duration, uploadBps = upBps, downloadBps = downBps)
+                    if (it.status == VpnStatus.CONNECTED) {
+                        it.copy(connectedDurationSeconds = duration)
+                    } else it
                 }
             }
         }
     }
 
-    private fun startPeriodicPing(proxy: ProxyConfig, target: String) {
-        pingJob?.cancel()
-        pingJob = scope.launch {
-            while (isActive) {
-                val ping = VpnManager.measurePingDirect(target, proxy.port, proxy.effectiveSni())
-                VpnManager.updateStats { it.copy(pingMs = ping) }
-                delay(15000)
+    private fun startCustomPing(proxy: ProxyConfig, cleanIp: String?) {
+        customPingJob?.cancel()
+        customPingJob = customScope.launch {
+            val target = cleanIp?.ifBlank { null } ?: proxy.address
+            val port = proxy.port
+            val sni = proxy.effectiveSni()
+            while (isActive && isCustomActive) {
+                val ping = VpnManager.measurePingDirect(target, port, sni)
+                VpnManager.updateStats {
+                    if (it.status == VpnStatus.CONNECTED) {
+                        it.copy(pingMs = ping)
+                    } else it
+                }
+                delay(5000)
             }
         }
     }
 
-    private fun stopVpn() {
-        if (isStopping) return
-        isStopping = true
+    private fun stopCustomVpn() {
+        isCustomActive = false
+        customTimerJob?.cancel()
+        customPingJob?.cancel()
+        customTimerJob = null
+        customPingJob = null
 
-        timerJob?.cancel()
-        pingJob?.cancel()
-        timerJob = null
-        pingJob = null
+        Tun2SocksManager.stop()
+        XrayProcessManager.stop()
+        runCatching { stormDnsManager.stop() }
+
+        runCatching { customVpnInterface?.close() }
+        customVpnInterface = null
 
         VpnManager.updateStats {
-            it.copy(
-                status = if (it.status == VpnStatus.ERROR) VpnStatus.ERROR else VpnStatus.DISCONNECTED,
-                connectedDurationSeconds = 0L,
-                pingMs = null,
-                uploadBps = 0L,
-                downloadBps = 0L,
-            )
-        }
-
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
-
-        scope.launch(Dispatchers.IO) {
-            try {
-                coreController?.stopLoop()
-            } catch (_: Exception) {
-            } finally {
-                coreController = null
-            }
-
-            try {
-                Thread.sleep(100)
-            } catch (_: Exception) {}
-
-            try {
-                vpnInterface?.close()
-            } catch (_: Exception) {
-            } finally {
-                vpnInterface = null
-                isStopping = false
+            // Preserve a failure reason: the catch paths set ERROR before calling
+            // here, and overwriting it with DISCONNECTED hid why custom connect
+            // died. Only a clean teardown reports DISCONNECTED.
+            if (it.status != VpnStatus.ERROR) {
+                sendStatus(STATUS_DISCONNECTED)
+                it.copy(status = VpnStatus.DISCONNECTED, connectedDurationSeconds = 0L)
+            } else {
+                it.copy(connectedDurationSeconds = 0L)
             }
         }
     }
 
     override fun onDestroy() {
-        stopVpn()
+        stopCustomVpn()
         super.onDestroy()
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Asha VPN Service",
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = "Shows live connection status for Asha VPN"
-                setShowBadge(false)
-            }
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(channel)
-        }
-    }
-
-    private fun buildNotification(text: String, isConnected: Boolean): Notification {
-        val openAppIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val openPending = PendingIntent.getActivity(
-            this, 0, openAppIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val stopIntent = Intent(this, AshaVpnService::class.java).apply {
-            action = ACTION_STOP
-        }
-        val stopPending = PendingIntent.getService(
-            this, 1, stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Asha VPN")
-            .setContentText(text)
-            .setSmallIcon(R.drawable.app_icon_asha)
-            .setContentIntent(openPending)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                if (isConnected) "Disconnect" else "Cancel",
-                stopPending
-            )
-            .build()
-    }
-
-    private fun updateNotification(text: String, isConnected: Boolean) {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIFICATION_ID, buildNotification(text, isConnected))
-    }
-
-    private fun unpackGeoAssets(context: Context) {
-        // Only the trimmed Iran-focused databases we bundle (the full public
-        // lists are ~27MB — our assets carry just the "IR" entries, ~40KB).
-        // ALWAYS overwrite: an older install may have left a stale or
-        // truncated geo file in filesDir, and xray fails with a misleading
-        // "... EOF" while parsing it. Copy is atomic (tmp + rename) so a
-        // killed process can never leave a half-written database behind.
-        val datFiles = listOf("geoip.dat", "geosite.dat")
-        for (name in datFiles) {
-            runCatching {
-                val tmp = java.io.File(context.filesDir, "$name.tmp")
-                context.assets.open(name).use { input ->
-                    tmp.outputStream().use { output -> input.copyTo(output) }
-                }
-                if (tmp.length() > 0L) {
-                    val target = java.io.File(context.filesDir, name)
-                    if (target.exists() && !target.delete()) {
-                        tmp.delete()
-                        return@runCatching
-                    }
-                    if (!tmp.renameTo(target)) tmp.delete()
-                } else {
-                    tmp.delete()
-                }
-            }
-        }
     }
 }

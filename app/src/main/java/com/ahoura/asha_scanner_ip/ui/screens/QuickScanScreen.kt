@@ -70,7 +70,7 @@ fun QuickScanScreen(vm: ScanViewModel, onBack: () -> Unit, onStart: () -> Unit) 
             ScanSettings(vm = vm, cfg = cfg, showAdvancedDefault = false)
         }
         Column(Modifier.padding(12.dp)) {
-            ScanButton(text = "▶  ${s.startScan}", icon = Icons.Filled.PlayArrow, onClick = onStart)
+            ScanButton(text = s.startScan, icon = Icons.Filled.PlayArrow, onClick = onStart)
         }
     }
 }

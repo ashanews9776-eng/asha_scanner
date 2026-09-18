@@ -21,11 +21,16 @@ enum class ProbeMode(val wire: String) {
 /** Supported proxy protocols for the config the user pastes. */
 enum class Protocol(val scheme: String) {
     VLESS("vless"),
-    TROJAN("trojan");
+    TROJAN("trojan"),
+    STORMDNS("stormdns");
 
     companion object {
-        fun fromScheme(s: String): Protocol? =
-            entries.firstOrNull { it.scheme.equals(s, ignoreCase = true) }
+        fun fromScheme(s: String): Protocol? = when (s.lowercase()) {
+            "vless" -> VLESS
+            "trojan" -> TROJAN
+            "stormdns", "masterdns", "cottendns" -> STORMDNS
+            else -> null
+        }
     }
 }
 
@@ -64,11 +69,22 @@ data class ProxyConfig(
     val mode: String = "",         // grpc/xhttp mode
     val publicKey: String = "",    // reality pbk
     val shortId: String = "",      // reality sid
+    val cipherSuites: String = "", // custom TLS cipher suites (cs)
+    val dialMode: String = "",     // outbound sockopt dialMode
     val remark: String = "",
     val raw: String = "",
 ) {
     /** Effective SNI to present when probing/validating an edge for this config. */
     fun effectiveSni(): String = sni.ifBlank { hostHeader.ifBlank { address } }
+
+    /** Whether this DNS tunnel profile targets the CottenDNS client engine. */
+    fun isCottenDns(): Boolean =
+        raw.startsWith("cottendns://", ignoreCase = true) ||
+        raw.contains("cottendns", ignoreCase = true) ||
+        remark.contains("cotten", ignoreCase = true)
+
+    /** Returns "cottendns" or "stormdns" engine name. */
+    fun dnsEngine(): String = if (isCottenDns()) "cottendns" else "stormdns"
 }
 
 /** User-tunable scan parameters. Defaults mirror SenPaiScanner's ScanDefaults. */

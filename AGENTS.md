@@ -23,7 +23,7 @@ On Windows the wrapper is `gradlew.bat`. JDK 17 is what CI uses (see
 
 Versions are centralized in `gradle/libs.versions.toml` (version catalog) — add
 deps there, then reference via `libs.*` in `app/build.gradle.kts`. SDK:
-`compileSdk`/`targetSdk` 37, `minSdk` 24. Bump `versionCode` + `versionName`
+`compileSdk`/`targetSdk` 37, `minSdk` 26. Bump `versionCode` + `versionName`
 together in `app/build.gradle.kts` for any release.
 
 ## Signing (release builds)

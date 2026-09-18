@@ -28,12 +28,16 @@ object XrayConfigBuilder {
         socksPort: Int = 10808,
         httpPort: Int = 10809,
         bypassIran: Boolean = false,
+        dnsServers: List<String> = emptyList(),
+        includeTun: Boolean = false,
     ): JSONObject {
         val root = JSONObject()
         root.put("log", JSONObject().put("loglevel", "warning"))
 
         val inbounds = JSONArray()
-        inbounds.put(buildTunInbound())
+        if (includeTun) {
+            inbounds.put(buildTunInbound())
+        }
         inbounds.put(buildInbound(socksPort, tag = "socks-in"))
         inbounds.put(buildHttpInbound(httpPort, tag = "http-in"))
         root.put("inbounds", inbounds)
@@ -43,7 +47,18 @@ object XrayConfigBuilder {
         outbounds.put(JSONObject().apply {
             put("tag", "direct")
             put("protocol", "freedom")
-            put("settings", JSONObject())
+            put("settings", JSONObject().apply {
+                put("domainStrategy", "UseIP")
+            })
+            put("streamSettings", JSONObject().apply {
+                put("sockopt", JSONObject().apply {
+                    put("domainStrategy", "UseIP")
+                    put("happyEyeballs", JSONObject().apply {
+                        put("tryDelayMs", 250)
+                        put("interleave", 2)
+                    })
+                })
+            })
         })
         outbounds.put(JSONObject().apply {
             put("tag", "block")
@@ -53,7 +68,7 @@ object XrayConfigBuilder {
         root.put("outbounds", outbounds)
 
         val routing = JSONObject()
-        routing.put("domainStrategy", "IPIfNonMatch")
+        routing.put("domainStrategy", if (proxy.protocol == Protocol.STORMDNS) "AsIs" else "IPIfNonMatch")
         val rules = JSONArray()
         if (bypassIran) {
             // Iranian split tunneling: every .ir domain + the curated Iranian
@@ -63,7 +78,7 @@ object XrayConfigBuilder {
             // bundled in assets (entries "IR" / "ir"; loaders match fold-case).
             rules.put(JSONObject().apply {
                 put("type", "field")
-                put("domain", JSONArray(listOf("geosite:ir")))
+                put("domain", JSONArray(listOf("domain:ir", "geosite:category-ir", "geosite:ir")))
                 put("outboundTag", "direct")
             })
             rules.put(JSONObject().apply {
@@ -98,7 +113,12 @@ object XrayConfigBuilder {
         root.put("routing", routing)
 
         val dns = JSONObject()
-        dns.put("servers", JSONArray(listOf("1.1.1.1", "8.8.8.8", "https://cloudflare-dns.com/dns-query")))
+        // First server wins for xray's own lookups; the DNS Tuner's fastest
+        // resolver leads when set. Default mirrors the previous hardcoded list.
+        dns.put(
+            "servers",
+            JSONArray(dnsServers.ifEmpty { listOf("1.1.1.1", "8.8.8.8", "https://cloudflare-dns.com/dns-query") }),
+        )
         root.put("dns", dns)
 
         // Traffic stats: without these policy flags xray-core never registers
@@ -126,7 +146,9 @@ object XrayConfigBuilder {
         socksPort: Int = 10808,
         httpPort: Int = 10809,
         bypassIran: Boolean = false,
-    ): String = buildClientVpnConfig(proxy, candidateIp, socksPort, httpPort, bypassIran).toString(2)
+        dnsServers: List<String> = emptyList(),
+        includeTun: Boolean = false,
+    ): String = buildClientVpnConfig(proxy, candidateIp, socksPort, httpPort, bypassIran, dnsServers, includeTun).toString(2)
 
     private fun buildTunInbound(): JSONObject = JSONObject().apply {
         put("tag", "tun")
@@ -138,7 +160,7 @@ object XrayConfigBuilder {
         })
         put("sniffing", JSONObject().apply {
             put("enabled", true)
-            put("destOverride", JSONArray(listOf("http", "tls", "quic")))
+            put("destOverride", JSONArray(listOf("fakedns", "http", "tls", "quic")))
         })
     }
 
@@ -167,7 +189,12 @@ object XrayConfigBuilder {
                 val user = JSONObject()
                     .put("id", proxy.uuid)
                     .put("encryption", proxy.encryption.ifBlank { "none" })
-                if (proxy.flow.isNotBlank()) user.put("flow", proxy.flow)
+                // XTLS flow (xtls-rprx-vision) is only valid over Reality — a
+                // Vision flow on plain TLS makes xray-core exit at config load,
+                // which killed every custom connect with such a link.
+                if (proxy.flow.isNotBlank() && proxy.security.equals("reality", ignoreCase = true)) {
+                    user.put("flow", proxy.flow)
+                }
                 val vnext = JSONObject()
                     .put("address", candidateIp)
                     .put("port", proxy.port)
@@ -180,7 +207,16 @@ object XrayConfigBuilder {
                     .put("address", candidateIp)
                     .put("port", proxy.port)
                     .put("password", proxy.password)
-                if (proxy.flow.isNotBlank()) server.put("flow", proxy.flow)
+                if (proxy.flow.isNotBlank() && proxy.security.equals("reality", ignoreCase = true)) {
+                    server.put("flow", proxy.flow)
+                }
+                settings.put("servers", JSONArray().put(server))
+            }
+            Protocol.STORMDNS -> {
+                outbound.put("protocol", "socks")
+                val server = JSONObject()
+                    .put("address", "127.0.0.1")
+                    .put("port", com.ahoura.asha_scanner_ip.core.storm.StormDnsProcessManager.SOCKS_PORT)
                 settings.put("servers", JSONArray().put(server))
             }
         }
@@ -190,6 +226,12 @@ object XrayConfigBuilder {
     }
 
     private fun buildStreamSettings(proxy: ProxyConfig): JSONObject {
+        if (proxy.protocol == Protocol.STORMDNS) {
+            return JSONObject().apply {
+                put("network", "tcp")
+                put("security", "none")
+            }
+        }
         val stream = JSONObject()
         stream.put("network", proxy.network.ifBlank { "tcp" })
         stream.put("security", proxy.security.ifBlank { "none" })
@@ -200,12 +242,14 @@ object XrayConfigBuilder {
                 put("allowInsecure", proxy.allowInsecure)
                 if (proxy.fingerprint.isNotBlank()) put("fingerprint", proxy.fingerprint)
                 if (proxy.alpn.isNotEmpty()) put("alpn", JSONArray(proxy.alpn))
+                if (proxy.cipherSuites.isNotBlank()) put("cipherSuites", proxy.cipherSuites)
             })
             "reality" -> stream.put("realitySettings", JSONObject().apply {
                 put("serverName", proxy.effectiveSni())
                 if (proxy.fingerprint.isNotBlank()) put("fingerprint", proxy.fingerprint)
                 if (proxy.publicKey.isNotBlank()) put("publicKey", proxy.publicKey)
                 if (proxy.shortId.isNotBlank()) put("shortId", proxy.shortId)
+                if (proxy.cipherSuites.isNotBlank()) put("cipherSuites", proxy.cipherSuites)
             })
         }
 
@@ -226,6 +270,13 @@ object XrayConfigBuilder {
                 if (proxy.mode.isNotBlank()) put("mode", proxy.mode)
             })
         }
+
+        if (proxy.dialMode.isNotBlank()) {
+            stream.put("sockopt", JSONObject().apply {
+                put("dialMode", proxy.dialMode)
+            })
+        }
+
         return stream
     }
 }

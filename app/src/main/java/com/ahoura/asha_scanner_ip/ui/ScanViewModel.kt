@@ -13,12 +13,17 @@ import com.ahoura.asha_scanner_ip.core.net.SubServer
 import com.ahoura.asha_scanner_ip.core.parser.ProxyParser
 import com.ahoura.asha_scanner_ip.data.SettingsStore
 import com.ahoura.asha_scanner_ip.ui.i18n.Lang
+import com.ahoura.asha_scanner_ip.core.dns.DnsProbe
+import com.ahoura.asha_scanner_ip.core.guard.SecureStore
+import com.msnguard.vpn.NativeCore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -67,13 +72,501 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     val vpnBypassIr: StateFlow<Boolean> = settings.vpnBypassIr
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    val vpnDnsIp: StateFlow<String> = settings.vpnDnsIp
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "1.1.1.1")
+
+    // ---- Asha Guard Transports & Settings State ----
+
+    private val guardPrefs: android.content.SharedPreferences =
+        app.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+
+    private fun getPrefString(key: String, def: String = ""): String =
+        runCatching { guardPrefs.getString(key, def) ?: def }.getOrDefault(def)
+
+    private fun getPrefBool(key: String, def: Boolean = false): Boolean =
+        runCatching { guardPrefs.getBoolean(key, def) }.getOrDefault(def)
+
+    private fun getPrefInt(key: String, def: Int = 0): Int =
+        runCatching { guardPrefs.getInt(key, def) }.getOrDefault(def)
+
+    val selectedTransport = MutableStateFlow(
+        getPrefString("default_protocol", "wireguard")
+    )
+    val tunnelMode = MutableStateFlow(
+        getPrefString("tunnel_mode", "vpn")
+    )
+    val lanSharing = MutableStateFlow(
+        getPrefBool("psiphon_lan_sharing", false)
+    )
+    val psiphonRegion = MutableStateFlow(
+        getPrefString("psiphon_egress_region", "auto")
+    )
+    val psiphonChained = MutableStateFlow(
+        getPrefBool("chain_armed", true)
+    )
+    val torMode = MutableStateFlow(
+        getPrefString("tor_mode", "auto")
+    )
+    val torRegion = MutableStateFlow(
+        getPrefString("tor_exit_region", "auto")
+    )
+    val torChained = MutableStateFlow(
+        getPrefBool("tor_chain_armed", true)
+    )
+    val chainOuterMode = MutableStateFlow(
+        getPrefString("chain_outer_mode", "auto")
+    )
+    val chainOuterModeTor = MutableStateFlow(
+        getPrefString("chain_outer_mode_tor", "auto")
+    )
+    val killSwitch = MutableStateFlow(
+        getPrefBool("kill_switch", false)
+    )
+    val proxyPort = MutableStateFlow(
+        getPrefInt("proxy_listen_port", 10808)
+    )
+    val masqueTransport = MutableStateFlow(
+        getPrefString("default_masque_transport", "h3")
+    )
+
+    fun setSelectedTransport(proto: String) {
+        selectedTransport.value = proto
+        guardPrefs.edit().putString("default_protocol", proto).apply()
+    }
+
+    fun setTunnelMode(mode: String) {
+        tunnelMode.value = mode
+        guardPrefs.edit().putString("tunnel_mode", mode).apply()
+    }
+
+    fun setLanSharing(enabled: Boolean) {
+        lanSharing.value = enabled
+        guardPrefs.edit().putBoolean("psiphon_lan_sharing", enabled).apply()
+    }
+
+    fun setPsiphonRegion(region: String) {
+        psiphonRegion.value = region
+        guardPrefs.edit().putString("psiphon_egress_region", region).apply()
+    }
+
+    fun setPsiphonChained(chained: Boolean) {
+        psiphonChained.value = chained
+        guardPrefs.edit().putBoolean("chain_armed", chained).apply()
+    }
+
+    fun setTorMode(mode: String) {
+        torMode.value = mode
+        guardPrefs.edit().putString("tor_mode", mode).apply()
+    }
+
+    fun setTorRegion(region: String) {
+        torRegion.value = region
+        guardPrefs.edit().putString("tor_exit_region", region).apply()
+    }
+
+    fun setTorChained(chained: Boolean) {
+        torChained.value = chained
+        guardPrefs.edit().putBoolean("tor_chain_armed", chained).apply()
+    }
+
+    fun setChainOuterMode(mode: String) {
+        chainOuterMode.value = mode
+        guardPrefs.edit().putString("chain_outer_mode", mode).apply()
+    }
+
+    fun setChainOuterModeTor(mode: String) {
+        chainOuterModeTor.value = mode
+        guardPrefs.edit().putString("chain_outer_mode_tor", mode).apply()
+    }
+
+    fun setKillSwitch(enabled: Boolean) {
+        killSwitch.value = enabled
+        guardPrefs.edit().putBoolean("kill_switch", enabled).apply()
+    }
+
+    fun setProxyPort(port: Int) {
+        proxyPort.value = port
+        guardPrefs.edit().putInt("proxy_listen_port", port).apply()
+    }
+
+    fun setMasqueTransport(t: String) {
+        masqueTransport.value = t
+        guardPrefs.edit().putString("default_masque_transport", t).apply()
+    }
+
+    val upstreamProxy = MutableStateFlow(
+        getPrefString("upstream_proxy", "")
+    )
+    val wiwOuter = MutableStateFlow(
+        getPrefString("wiw_outer", "")
+    )
+    val wiwInner = MutableStateFlow(
+        getPrefString("wiw_inner", "")
+    )
+    val manualEndpoint = MutableStateFlow(
+        getPrefString("manual_endpoint", "")
+    )
+
+    // Cloudflare Zero Trust states
+    val zeroTrustTeam = MutableStateFlow(
+        SecureStore.getSecret(getApplication(), "zero_trust_team")
+    )
+    val zeroTrustEmail = MutableStateFlow(
+        SecureStore.getSecret(getApplication(), "zero_trust_email")
+    )
+    val zeroTrustToken = MutableStateFlow(
+        SecureStore.getSecret(getApplication(), "zero_trust_token")
+    )
+    val zeroTrustClientId = MutableStateFlow(
+        SecureStore.getSecret(getApplication(), "zero_trust_client_id")
+    )
+    val zeroTrustClientSecret = MutableStateFlow(
+        SecureStore.getSecret(getApplication(), "zero_trust_client_secret")
+    )
+    val zeroTrustGateway = MutableStateFlow(
+        getPrefBool("zero_trust_gateway", false)
+    )
+    val zeroTrustOtpSent = MutableStateFlow(false)
+    val zeroTrustBusy = MutableStateFlow(false)
+    val zeroTrustMessage = MutableStateFlow<String?>(null)
+
+    fun setUpstreamProxy(value: String) {
+        upstreamProxy.value = value.trim()
+        guardPrefs.edit().putString("upstream_proxy", value.trim()).apply()
+    }
+
+    fun setWiwEndpoints(outer: String, inner: String) {
+        wiwOuter.value = outer.trim()
+        wiwInner.value = inner.trim()
+        guardPrefs.edit()
+            .putString("wiw_outer", outer.trim())
+            .putString("wiw_inner", inner.trim())
+            .apply()
+    }
+
+    fun setWiwOuter(outer: String) {
+        wiwOuter.value = outer.trim()
+        guardPrefs.edit().putString("wiw_outer", outer.trim()).apply()
+    }
+
+    fun setWiwInner(inner: String) {
+        wiwInner.value = inner.trim()
+        guardPrefs.edit().putString("wiw_inner", inner.trim()).apply()
+    }
+
+    fun setManualEndpoint(endpoint: String) {
+        manualEndpoint.value = endpoint.trim()
+        guardPrefs.edit().putString("manual_endpoint", endpoint.trim()).apply()
+    }
+
+    fun requestZeroTrustCode(team: String, email: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            zeroTrustBusy.value = true
+            zeroTrustMessage.value = null
+            try {
+                NativeCore.requestEmailCode(team.trim(), email.trim())
+                SecureStore.putSecret(getApplication(), "zero_trust_team", team.trim())
+                SecureStore.putSecret(getApplication(), "zero_trust_email", email.trim())
+                zeroTrustTeam.value = team.trim()
+                zeroTrustEmail.value = email.trim()
+                zeroTrustOtpSent.value = true
+                zeroTrustMessage.value = "Code sent to ${email.trim()}"
+            } catch (e: Exception) {
+                zeroTrustMessage.value = "Error: ${e.message ?: "Failed to send code"}"
+            } finally {
+                zeroTrustBusy.value = false
+            }
+        }
+    }
+
+    fun confirmZeroTrustCode(code: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            zeroTrustBusy.value = true
+            zeroTrustMessage.value = null
+            try {
+                val token = NativeCore.confirmEmailCode(code.trim())
+                SecureStore.putSecret(getApplication(), "zero_trust_token", token)
+                zeroTrustToken.value = token
+                zeroTrustOtpSent.value = false
+                zeroTrustMessage.value = "Zero Trust enrollment successful!"
+            } catch (e: Exception) {
+                zeroTrustMessage.value = "Verification failed: ${e.message ?: "Invalid code"}"
+            } finally {
+                zeroTrustBusy.value = false
+            }
+        }
+    }
+
+    fun setZeroTrustServiceToken(team: String, clientId: String, clientSecret: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            SecureStore.putSecret(getApplication(), "zero_trust_team", team.trim())
+            SecureStore.putSecret(getApplication(), "zero_trust_client_id", clientId.trim())
+            SecureStore.putSecret(getApplication(), "zero_trust_client_secret", clientSecret.trim())
+            zeroTrustTeam.value = team.trim()
+            zeroTrustClientId.value = clientId.trim()
+            zeroTrustClientSecret.value = clientSecret.trim()
+            zeroTrustMessage.value = "Service token saved!"
+        }
+    }
+
+    fun setZeroTrustGateway(enabled: Boolean) {
+        zeroTrustGateway.value = enabled
+        guardPrefs.edit().putBoolean("zero_trust_gateway", enabled).apply()
+    }
+
+    fun clearZeroTrust() {
+        viewModelScope.launch(Dispatchers.IO) {
+            SecureStore.removeSecret(getApplication(), "zero_trust_team")
+            SecureStore.removeSecret(getApplication(), "zero_trust_email")
+            SecureStore.removeSecret(getApplication(), "zero_trust_token")
+            SecureStore.removeSecret(getApplication(), "zero_trust_client_id")
+            SecureStore.removeSecret(getApplication(), "zero_trust_client_secret")
+            guardPrefs.edit().remove("zero_trust_gateway").apply()
+            zeroTrustTeam.value = ""
+            zeroTrustEmail.value = ""
+            zeroTrustToken.value = ""
+            zeroTrustClientId.value = ""
+            zeroTrustClientSecret.value = ""
+            zeroTrustGateway.value = false
+            zeroTrustOtpSent.value = false
+            zeroTrustMessage.value = "Zero Trust credentials cleared"
+        }
+    }
+
+    fun connectWithScannedIpAsWarp(
+        context: android.content.Context,
+        cleanIp: String,
+        port: Int = 443,
+        transport: String = "wireguard"
+    ) {
+        viewModelScope.launch {
+            val endpoint = if (cleanIp.contains(":")) cleanIp else "$cleanIp:$port"
+            setManualEndpoint(endpoint)
+            setSelectedTransport(transport)
+            startVpnTransport(context, transport)
+        }
+    }
+
+    // ---- DNS Tuner state (WhiteDNS-inspired architecture) ----
+
+    enum class DnsScanStatus {
+        IDLE,
+        RUNNING,
+        PAUSED,
+        COMPLETED,
+    }
+
+    data class DnsUiState(
+        val resolvers: List<DnsProbe.ResolverDef> = emptyList(),
+        val results: Map<String, DnsProbe.ProbeResult> = emptyMap(),
+        val status: DnsScanStatus = DnsScanStatus.IDLE,
+        val workerCount: Int = 8,
+        val selectedCategory: DnsProbe.ResolverCategory? = null,
+        val targetDomain: String = "digikala.com",
+        val done: Int = 0,
+        val valid: Int = 0,
+        val rejected: Int = 0,
+        val total: Int = 0,
+        val searchQuery: String = "",
+    ) {
+        val fraction: Float
+            get() = if (total > 0) (done.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
+
+        val isRunning: Boolean
+            get() = status == DnsScanStatus.RUNNING
+
+        val canResume: Boolean
+            get() = !isRunning && (status == DnsScanStatus.PAUSED || status == DnsScanStatus.IDLE) && done > 0 && done < total
+
+        val filteredResolvers: List<DnsProbe.ResolverDef>
+            get() {
+                val byCategory = if (selectedCategory == null) resolvers else resolvers.filter { it.category == selectedCategory }
+                if (searchQuery.isBlank()) return byCategory
+                val q = searchQuery.trim().lowercase()
+                return byCategory.filter { it.name.lowercase().contains(q) || it.ip.contains(q) }
+            }
+    }
+
+    private val _dnsState = MutableStateFlow(DnsUiState())
+    val dnsState: StateFlow<DnsUiState> = _dnsState.asStateFlow()
+
     private var scanJob: Job? = null
+    private var dnsResolversLoaded = false
+    private var dnsTestJob: Job? = null
+
+    /** Load bundled and user-saved custom resolver lists. */
+    fun loadDnsResolvers() {
+        if (dnsResolversLoaded) return
+        dnsResolversLoaded = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val bundled = readAssetLines("dns_resolvers.txt").mapNotNull { DnsProbe.parseResolverLine(it) }
+            val savedCustomText = settings.customDnsResolvers.first()
+            val custom = savedCustomText.lines().mapNotNull { DnsProbe.parseResolverLine(it) }.map {
+                it.copy(category = DnsProbe.ResolverCategory.CUSTOM)
+            }
+            val workers = settings.dnsWorkerCount.first()
+            val all = (bundled + custom).distinctBy { it.ip }
+            _dnsState.update {
+                it.copy(
+                    resolvers = all,
+                    workerCount = workers,
+                    total = all.size,
+                )
+            }
+        }
+    }
+
+    /** Start or resume parallel resolver probing (lane-capped with workerCount). */
+    fun startDnsScan(resume: Boolean = false) {
+        val allResolvers = _dnsState.value.resolvers
+        if (allResolvers.isEmpty() || _dnsState.value.isRunning) return
+
+        val resolversToProbe = if (resume) {
+            allResolvers.filterNot { _dnsState.value.results.containsKey(it.ip) }
+        } else {
+            allResolvers
+        }
+
+        if (resolversToProbe.isEmpty()) {
+            _dnsState.update { it.copy(status = DnsScanStatus.COMPLETED) }
+            return
+        }
+
+        dnsTestJob?.cancel()
+        dnsTestJob = viewModelScope.launch {
+            if (!resume) {
+                _dnsState.update {
+                    it.copy(
+                        status = DnsScanStatus.RUNNING,
+                        results = emptyMap(),
+                        done = 0,
+                        valid = 0,
+                        rejected = 0,
+                        total = allResolvers.size,
+                    )
+                }
+            } else {
+                _dnsState.update {
+                    it.copy(
+                        status = DnsScanStatus.RUNNING,
+                        total = allResolvers.size,
+                    )
+                }
+            }
+
+            try {
+                DnsProbe.probeAll(
+                    resolvers = resolversToProbe,
+                    domain = _dnsState.value.targetDomain,
+                    concurrency = _dnsState.value.workerCount,
+                ) { result ->
+                    _dnsState.update { curr ->
+                        val isValid = result.latencyMs != null
+                        curr.copy(
+                            results = curr.results + (result.ip to result),
+                            done = curr.done + 1,
+                            valid = if (isValid) curr.valid + 1 else curr.valid,
+                            rejected = if (!isValid) curr.rejected + 1 else curr.rejected,
+                        )
+                    }
+                }
+                _dnsState.update { it.copy(status = DnsScanStatus.COMPLETED) }
+            } catch (_: CancellationException) {
+                _dnsState.update { it.copy(status = DnsScanStatus.PAUSED) }
+            }
+        }
+    }
+
+    /** Gracefully stops an active DNS scan. */
+    fun stopDnsScan() {
+        dnsTestJob?.cancel()
+        _dnsState.update { it.copy(status = DnsScanStatus.PAUSED) }
+    }
+
+    fun setDnsWorkerCount(count: Int) {
+        val safe = count.coerceIn(1, 32)
+        _dnsState.update { it.copy(workerCount = safe) }
+        viewModelScope.launch { settings.setDnsWorkerCount(safe) }
+    }
+
+    fun setDnsCategoryFilter(category: DnsProbe.ResolverCategory?) {
+        _dnsState.update { it.copy(selectedCategory = category) }
+    }
+
+    fun setDnsSearchQuery(query: String) {
+        _dnsState.update { it.copy(searchQuery = query) }
+    }
+
+    fun setDnsTargetDomain(domain: String) {
+        val d = domain.trim().ifBlank { "digikala.com" }
+        _dnsState.update { it.copy(targetDomain = d) }
+    }
+
+    fun addCustomResolver(name: String, ip: String): Boolean {
+        val trimmedIp = ip.trim()
+        if (!DnsProbe.isValidIp(trimmedIp)) return false
+        val trimmedName = name.trim().ifBlank { trimmedIp }
+        val newDef = DnsProbe.ResolverDef(name = trimmedName, ip = trimmedIp, category = DnsProbe.ResolverCategory.CUSTOM)
+        val updatedList = (_dnsState.value.resolvers.filterNot { it.ip == trimmedIp } + newDef)
+        _dnsState.update { it.copy(resolvers = updatedList, total = updatedList.size) }
+        persistCustomResolvers(updatedList)
+        return true
+    }
+
+    fun deleteCustomResolver(ip: String) {
+        val updatedList = _dnsState.value.resolvers.filterNot { it.ip == ip && it.category == DnsProbe.ResolverCategory.CUSTOM }
+        _dnsState.update {
+            it.copy(
+                resolvers = updatedList,
+                results = it.results - ip,
+                total = updatedList.size,
+            )
+        }
+        persistCustomResolvers(updatedList)
+    }
+
+    fun importResolvers(text: String): Int {
+        val newItems = text.lines().mapNotNull { DnsProbe.parseResolverLine(it) }.map {
+            it.copy(category = DnsProbe.ResolverCategory.CUSTOM)
+        }
+        if (newItems.isEmpty()) return 0
+        val existingIps = _dnsState.value.resolvers.map { it.ip }.toSet()
+        val toAdd = newItems.filter { !existingIps.contains(it.ip) }.distinctBy { it.ip }
+        if (toAdd.isNotEmpty()) {
+            val updated = _dnsState.value.resolvers + toAdd
+            _dnsState.update { it.copy(resolvers = updated, total = updated.size) }
+            persistCustomResolvers(updated)
+        }
+        return toAdd.size
+    }
+
+    fun exportWorkingResolversText(): String {
+        return _dnsState.value.results.values
+            .filter { it.latencyMs != null }
+            .sortedBy { it.latencyMs }
+            .joinToString("\n") { "${it.name}|${it.ip}" }
+    }
+
+    private fun persistCustomResolvers(list: List<DnsProbe.ResolverDef>) {
+        val customDefs = list.filter { it.category == DnsProbe.ResolverCategory.CUSTOM }
+        val serialized = customDefs.joinToString("\n") { "CUSTOM|${it.name}|${it.ip}" }
+        viewModelScope.launch { settings.setCustomDnsResolvers(serialized) }
+    }
+
+    /** Fastest answered resolver from the last test run, if any. */
+    fun fastestDns(): DnsProbe.ProbeResult? =
+        _dnsState.value.results.values.filter { it.latencyMs != null }.minByOrNull { it.latencyMs!! }
+
+    fun applyDns(ip: String) {
+        viewModelScope.launch { settings.setVpnDnsIp(ip) }
+    }
 
     // Built-in open-site fallback domains from assets/cf_domains.txt. Kept apart
     // from the user's custom additions so the two can be merged on every edit.
     private var bundledDomains: List<String> = emptyList()
 
     init {
+        com.ahoura.asha_scanner_ip.core.vpn.VpnManager.init(app)
         // Load the precise Cloudflare IPv4 ranges (ircfspace list) and the
         // open-site fallback domain list bundled in assets, off the main thread.
         viewModelScope.launch(Dispatchers.IO) {
@@ -275,7 +768,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                     mode = com.ahoura.asha_scanner_ip.core.model.ProbeMode.HTTP, speedTest = true,
                     top = 20, stabilityCount = 10
                 )
-                else -> it
+                com.ahoura.asha_scanner_ip.core.model.ScanTier.CUSTOM -> it.copy(tier = tier)
             }
         }
     }
@@ -364,7 +857,6 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         subServer.stop()
-        super.onCleared()
     }
 
     fun reset() {
@@ -398,7 +890,25 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- VPN Client Controller ----
 
+    fun startVpn(context: android.content.Context) {
+        val transport = selectedTransport.value
+        if (transport == "custom") {
+            val profile = activeProfile.value
+            if (profile != null) {
+                startVpn(context, profile)
+            }
+        } else {
+            startVpnTransport(context, transport)
+        }
+    }
+
+    fun startVpnTransport(context: android.content.Context, transport: String) {
+        setSelectedTransport(transport)
+        com.ahoura.asha_scanner_ip.core.vpn.VpnManager.startTransport(context, transport)
+    }
+
     fun startVpn(context: android.content.Context, profile: com.ahoura.asha_scanner_ip.core.vpn.VpnProfile) {
+        setSelectedTransport("custom")
         com.ahoura.asha_scanner_ip.core.vpn.VpnManager.start(context, profile)
     }
 

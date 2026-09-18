@@ -124,7 +124,7 @@ fun TestIpsScreen(vm: ScanViewModel, onBack: () -> Unit, onStart: () -> Unit) {
             }
         }
         Column(Modifier.padding(12.dp)) {
-            ScanButton(text = "▶  ${s.startTest}", icon = Icons.Filled.PlayArrow, active = count > 0) {
+            ScanButton(text = s.startTest, icon = Icons.Filled.PlayArrow, active = count > 0) {
                 vm.updateScanConfig {
                     it.copy(tries = 6, timeoutMs = 10_000, concurrency = 20, speedTest = true, top = 50, smartStop = false)
                 }

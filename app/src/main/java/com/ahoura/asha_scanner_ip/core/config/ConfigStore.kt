@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.preferences.core.emptyPreferences
 import com.ahoura.asha_scanner_ip.core.parser.ProxyParser
 import com.ahoura.asha_scanner_ip.core.vpn.VpnProfile
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -23,12 +25,17 @@ class ConfigStore(private val context: Context) {
     private val keyProfilesJson = stringPreferencesKey("profiles_json")
     private val keyActiveProfileId = stringPreferencesKey("active_profile_id")
 
-    val profiles: Flow<List<VpnProfile>> = context.configDataStore.data.map { prefs ->
+    private val safeConfigFlow = context.configDataStore.data
+        .catch {
+            emit(emptyPreferences())
+        }
+
+    val profiles: Flow<List<VpnProfile>> = safeConfigFlow.map { prefs ->
         val jsonStr = prefs[keyProfilesJson] ?: "[]"
         deserializeProfiles(jsonStr)
     }
 
-    val activeProfileId: Flow<String?> = context.configDataStore.data.map { prefs ->
+    val activeProfileId: Flow<String?> = safeConfigFlow.map { prefs ->
         prefs[keyActiveProfileId]
     }
 
@@ -46,63 +53,75 @@ class ConfigStore(private val context: Context) {
             proxy = proxy,
             cleanIp = cleanIp?.ifBlank { null },
         )
-        context.configDataStore.edit { prefs ->
-            val list = deserializeProfiles(prefs[keyProfilesJson] ?: "[]").toMutableList()
-            list.add(0, profile)
-            prefs[keyProfilesJson] = serializeProfiles(list)
-            if (prefs[keyActiveProfileId].isNullOrBlank()) {
-                prefs[keyActiveProfileId] = profile.id
+        runCatching {
+            context.configDataStore.edit { prefs ->
+                val list = deserializeProfiles(prefs[keyProfilesJson] ?: "[]").toMutableList()
+                list.add(0, profile)
+                prefs[keyProfilesJson] = serializeProfiles(list)
+                if (prefs[keyActiveProfileId].isNullOrBlank()) {
+                    prefs[keyActiveProfileId] = profile.id
+                }
             }
         }
         return profile
     }
 
     suspend fun updateProfile(profile: VpnProfile) {
-        context.configDataStore.edit { prefs ->
-            val list = deserializeProfiles(prefs[keyProfilesJson] ?: "[]").toMutableList()
-            val idx = list.indexOfFirst { it.id == profile.id }
-            if (idx >= 0) {
-                list[idx] = profile
-                prefs[keyProfilesJson] = serializeProfiles(list)
+        runCatching {
+            context.configDataStore.edit { prefs ->
+                val list = deserializeProfiles(prefs[keyProfilesJson] ?: "[]").toMutableList()
+                val idx = list.indexOfFirst { it.id == profile.id }
+                if (idx >= 0) {
+                    list[idx] = profile
+                    prefs[keyProfilesJson] = serializeProfiles(list)
+                }
             }
         }
     }
 
     suspend fun deleteProfile(id: String) {
-        context.configDataStore.edit { prefs ->
-            val list = deserializeProfiles(prefs[keyProfilesJson] ?: "[]").toMutableList()
-            list.removeAll { it.id == id }
-            prefs[keyProfilesJson] = serializeProfiles(list)
-            if (prefs[keyActiveProfileId] == id) {
-                prefs[keyActiveProfileId] = list.firstOrNull()?.id ?: ""
+        runCatching {
+            context.configDataStore.edit { prefs ->
+                val list = deserializeProfiles(prefs[keyProfilesJson] ?: "[]").toMutableList()
+                list.removeAll { it.id == id }
+                prefs[keyProfilesJson] = serializeProfiles(list)
+                if (prefs[keyActiveProfileId] == id) {
+                    prefs[keyActiveProfileId] = list.firstOrNull()?.id ?: ""
+                }
             }
         }
     }
 
     suspend fun setActiveProfileId(id: String) {
-        context.configDataStore.edit { prefs ->
-            prefs[keyActiveProfileId] = id
+        runCatching {
+            context.configDataStore.edit { prefs ->
+                prefs[keyActiveProfileId] = id
+            }
         }
     }
 
     suspend fun updateCleanIp(profileId: String, cleanIp: String?) {
-        context.configDataStore.edit { prefs ->
-            val list = deserializeProfiles(prefs[keyProfilesJson] ?: "[]").toMutableList()
-            val idx = list.indexOfFirst { it.id == profileId }
-            if (idx >= 0) {
-                list[idx] = list[idx].copy(cleanIp = cleanIp?.ifBlank { null })
-                prefs[keyProfilesJson] = serializeProfiles(list)
+        runCatching {
+            context.configDataStore.edit { prefs ->
+                val list = deserializeProfiles(prefs[keyProfilesJson] ?: "[]").toMutableList()
+                val idx = list.indexOfFirst { it.id == profileId }
+                if (idx >= 0) {
+                    list[idx] = list[idx].copy(cleanIp = cleanIp?.ifBlank { null })
+                    prefs[keyProfilesJson] = serializeProfiles(list)
+                }
             }
         }
     }
 
     suspend fun updatePing(profileId: String, pingMs: Long?) {
-        context.configDataStore.edit { prefs ->
-            val list = deserializeProfiles(prefs[keyProfilesJson] ?: "[]").toMutableList()
-            val idx = list.indexOfFirst { it.id == profileId }
-            if (idx >= 0) {
-                list[idx] = list[idx].copy(pingMs = pingMs)
-                prefs[keyProfilesJson] = serializeProfiles(list)
+        runCatching {
+            context.configDataStore.edit { prefs ->
+                val list = deserializeProfiles(prefs[keyProfilesJson] ?: "[]").toMutableList()
+                val idx = list.indexOfFirst { it.id == profileId }
+                if (idx >= 0) {
+                    list[idx] = list[idx].copy(pingMs = pingMs)
+                    prefs[keyProfilesJson] = serializeProfiles(list)
+                }
             }
         }
     }

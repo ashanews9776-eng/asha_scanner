@@ -92,6 +92,7 @@ class TunnelValidator(
             val header = when (proxy.protocol) {
                 Protocol.VLESS -> ProxyHandshake.vlessHeader(proxy.uuid, measureHost, measurePort)
                 Protocol.TROJAN -> ProxyHandshake.trojanHeader(proxy.password, measureHost, measurePort)
+                Protocol.STORMDNS -> throw UnsupportedOperationException("StormDNS is validated via DNS probe")
             }
             val httpReq = buildString {
                 append("GET /__down?bytes=").append(downloadBytes).append(" HTTP/1.1\r\n")

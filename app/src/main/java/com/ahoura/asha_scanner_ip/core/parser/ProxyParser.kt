@@ -2,14 +2,15 @@ package com.ahoura.asha_scanner_ip.core.parser
 
 import com.ahoura.asha_scanner_ip.core.model.Protocol
 import com.ahoura.asha_scanner_ip.core.model.ProxyConfig
+import org.json.JSONObject
 import java.net.URLDecoder
+import java.util.Base64
 
 /**
- * Parses `vless://` and `trojan://` share links into a [ProxyConfig].
+ * Parses `vless://`, `trojan://`, and `stormdns://` share links into a [ProxyConfig].
  *
- * Kotlin port of SenPaiScanner's `internal/xraytest/parser.go`, including the
- * recovery paths for malformed links (missing `?` between port and query, IPv6
- * bracket handling). Tolerant by design — real-world configs are messy.
+ * Supports VLESS/Trojan proxy configs as well as WhiteDNS/MasterDNS/CottenDNS
+ * DNS Tunnel profiles (`stormdns://`, `masterdns://`, `cottendns://`).
  */
 object ProxyParser {
 
@@ -21,7 +22,8 @@ object ProxyParser {
         return when (Protocol.fromScheme(scheme)) {
             Protocol.VLESS -> parseVless(raw)
             Protocol.TROJAN -> parseTrojan(raw)
-            else -> throw ParseException("Unsupported link. Expected vless:// or trojan://")
+            Protocol.STORMDNS -> parseStormDns(raw)
+            else -> throw ParseException("Unsupported link. Expected vless://, trojan://, or stormdns://")
         }
     }
 
@@ -58,6 +60,8 @@ object ProxyParser {
             mode = q["mode"] ?: "",
             publicKey = q["pbk"] ?: "",
             shortId = q["sid"] ?: "",
+            cipherSuites = q["cs"] ?: q["cipherSuites"] ?: "",
+            dialMode = q["dialMode"] ?: "",
             remark = parts.remark,
             raw = raw,
         )
@@ -86,6 +90,8 @@ object ProxyParser {
             hostHeader = decode(q["host"]) ?: "",
             serviceName = decode(q["serviceName"]) ?: "",
             mode = q["mode"] ?: "",
+            cipherSuites = q["cs"] ?: q["cipherSuites"] ?: "",
+            dialMode = q["dialMode"] ?: "",
             remark = parts.remark,
             raw = raw,
         )
@@ -186,4 +192,98 @@ object ProxyParser {
         } catch (_: Exception) {
             s
         }
+
+    /**
+     * Parses `stormdns://<payload>`, `masterdns://<payload>`, or `cottendns://<payload>`.
+     * Decodes the Base64/Base64Url JSON payload matching the WhiteDNS profile specification.
+     */
+    fun parseStormDns(raw: String): ProxyConfig {
+        val schemeSep = raw.indexOf("://")
+        if (schemeSep < 0) throw ParseException("Missing scheme separator in DNS profile link")
+        val rawPayload = raw.substring(schemeSep + 3).trim()
+        val cleanPayload = rawPayload.substringBefore('#').substringBefore('?')
+        if (cleanPayload.isBlank()) throw ParseException("DNS profile link payload is empty")
+
+        val padded = cleanPayload.padEnd(cleanPayload.length + ((4 - cleanPayload.length % 4) % 4), '=')
+        val bytes = decodeBase64Safe(padded) ?: throw ParseException("DNS profile payload is not valid Base64")
+
+        val jsonString = bytes.toString(Charsets.UTF_8)
+        val root = runCatching { JSONObject(jsonString) }.getOrElse {
+            throw ParseException("Malformed JSON in DNS profile: ${it.message}")
+        }
+
+        val profileObj = root.optJSONObject("profile")
+        val serverObj = profileObj?.optJSONObject("server") ?: root.optJSONObject("server")
+
+        val domain = serverObj?.optString("domain")?.takeIf { it.isNotBlank() }
+            ?: serverObj?.optJSONArray("domains")?.optString(0)?.takeIf { it.isNotBlank() }
+            ?: root.optString("domain").takeIf { it.isNotBlank() }
+            ?: throw ParseException("Missing server domain in DNS profile")
+        val encryptionKey = serverObj?.optString("encryption_key")
+            ?: root.optString("encryption_key").ifBlank { throw ParseException("Missing encryption key in DNS profile") }
+        val encryptionMethod = serverObj?.optInt("encryption_method", 1)
+            ?: root.optInt("encryption_method", 1)
+        val name = profileObj?.optString("name")
+            ?: root.optString("name", domain)
+
+        return ProxyConfig(
+            protocol = Protocol.STORMDNS,
+            address = domain.trim().trimEnd('.'),
+            port = 53,
+            password = encryptionKey.trim(),
+            encryption = encryptionMethod.toString(),
+            remark = name.ifBlank { domain },
+            raw = raw,
+        )
+    }
+
+    /**
+     * Exports a StormDNS profile into a shareable `stormdns://` URI matching WhiteDNS schema.
+     */
+    fun exportStormDns(
+        name: String,
+        domain: String,
+        encryptionKey: String,
+        encryptionMethod: Int = 1,
+    ): String {
+        val root = JSONObject().apply {
+            put("schema", "whitedns.profile")
+            put("version", 1)
+            put("profile", JSONObject().apply {
+                put("name", name.ifBlank { domain })
+                put("server", JSONObject().apply {
+                    put("domain", domain.trim().trimEnd('.'))
+                    put("encryption_key", encryptionKey.trim())
+                    put("encryption_method", encryptionMethod.coerceIn(0, 5))
+                })
+            })
+        }
+        val encoded = encodeBase64Safe(root.toString().toByteArray(Charsets.UTF_8))
+        return "stormdns://$encoded"
+    }
+
+    private fun decodeBase64Safe(s: String): ByteArray? {
+        return runCatching {
+            android.util.Base64.decode(s, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING)
+        }.recoverCatching {
+            android.util.Base64.decode(s, android.util.Base64.DEFAULT)
+        }.recoverCatching {
+            java.util.Base64.getUrlDecoder().decode(s)
+        }.recoverCatching {
+            java.util.Base64.getDecoder().decode(s)
+        }.getOrNull()
+    }
+
+    private fun encodeBase64Safe(bytes: ByteArray): String {
+        return runCatching {
+            android.util.Base64.encodeToString(
+                bytes,
+                android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+            ).trim()
+        }.recoverCatching {
+            java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+        }.getOrDefault("")
+    }
 }
+
+

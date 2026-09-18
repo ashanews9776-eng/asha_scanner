@@ -73,7 +73,7 @@ fun DiscoverScreen(vm: ScanViewModel, onBack: () -> Unit, onStart: () -> Unit) {
             }
         }
         Column(Modifier.padding(12.dp)) {
-            ScanButton(text = "▶  ${s.startDiscovery}", icon = Icons.Filled.PlayArrow, onClick = onStart)
+            ScanButton(text = s.startDiscovery, icon = Icons.Filled.PlayArrow, onClick = onStart)
         }
     }
 }

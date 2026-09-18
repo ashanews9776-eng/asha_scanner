@@ -37,7 +37,7 @@ import com.ahoura.asha_scanner_ip.ui.screens.ResultsScreen
 import com.ahoura.asha_scanner_ip.ui.screens.ScanLiveScreen
 import com.ahoura.asha_scanner_ip.ui.screens.TestIpsScreen
 
-enum class Route { HOME, QUICK, CUSTOM, TEST, DISCOVER, LIVE, RESULTS, VPN, ABOUT }
+enum class Route { HOME, QUICK, CUSTOM, TEST, DISCOVER, LIVE, RESULTS, VPN, DNS, ABOUT }
 
 const val TELEGRAM_HANDLE = "@asha_news2"
 const val TELEGRAM_URL = "https://t.me/asha_news2"
@@ -86,6 +86,7 @@ fun AshaApp(vm: ScanViewModel) {
                                     onTest = { push(Route.TEST) },
                                     onDiscover = { vm.prepareDiscover(); push(Route.DISCOVER) },
                                     onVpn = { push(Route.VPN) },
+                                    onDns = { push(Route.DNS) },
                                     onAbout = { push(Route.ABOUT) },
                                     onToggleLang = { vm.toggleLanguage() },
                                 )
@@ -118,10 +119,16 @@ fun AshaApp(vm: ScanViewModel) {
                                         vm.connectWithScannedIp(context, cleanIp, state.parsedProxy)
                                         push(Route.VPN)
                                     },
+                                    onOpenVpn = { push(Route.VPN) },
                                 )
                                 Route.VPN -> com.ahoura.asha_scanner_ip.ui.screens.VpnScreen(
                                     vm = vm,
                                     onBack = ::back,
+                                )
+                                Route.DNS -> com.ahoura.asha_scanner_ip.ui.screens.DnsScreen(
+                                    vm = vm,
+                                    onBack = ::back,
+                                    onOpenVpn = { push(Route.VPN) },
                                 )
                                 Route.ABOUT -> AboutScreen(onBack = ::back)
                             }

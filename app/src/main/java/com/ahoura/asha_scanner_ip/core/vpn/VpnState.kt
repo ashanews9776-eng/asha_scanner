@@ -54,4 +54,11 @@ data class VpnStats(
     val errorMessage: String? = null,
     val uploadBps: Long = 0L,
     val downloadBps: Long = 0L,
+    val detailMessage: String? = null,
+    val progress: Int = -1,
+    val exitIp: String? = null,
+    val country: String? = null,
+    val transport: String = "wireguard",
+    val tunnelMode: String = "vpn",
+    val localLanIp: String? = null,
 )

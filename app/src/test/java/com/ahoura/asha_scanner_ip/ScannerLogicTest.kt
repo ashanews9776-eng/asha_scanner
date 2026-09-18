@@ -130,6 +130,33 @@ class ScannerLogicTest {
         assertTrue("sni injected", link.contains("sni=example.com"))
     }
 
+    @Test
+    fun parsesAndPreservesCipherSuitesAndDialMode() {
+        val raw = "vless://11111111-2222-3333-4444-555555555555@example.com:443?security=tls&cs=TLS_AES_128_GCM_SHA256&dialMode=ipv4&fp=unsafe#Node"
+        val proxy = ProxyParser.parse(raw)
+        assertEquals("TLS_AES_128_GCM_SHA256", proxy.cipherSuites)
+        assertEquals("ipv4", proxy.dialMode)
+        assertEquals("unsafe", proxy.fingerprint)
+
+        val exported = ConfigLinkBuilder.withAddress(proxy, "104.16.1.1", 443)
+        assertTrue("preserves cs", exported.contains("cs=TLS_AES_128_GCM_SHA256"))
+        assertTrue("preserves dialMode", exported.contains("dialMode=ipv4"))
+        assertTrue("preserves unsafe fp", exported.contains("fp=unsafe"))
+
+        val xrayJson = com.ahoura.asha_scanner_ip.core.validator.XrayConfigBuilder.buildClientVpnConfig(proxy, "104.16.1.1", includeTun = true)
+        val outbounds = xrayJson.getJSONArray("outbounds")
+        val proxyOutbound = outbounds.getJSONObject(0)
+        val stream = proxyOutbound.getJSONObject("streamSettings")
+        assertEquals("TLS_AES_128_GCM_SHA256", stream.getJSONObject("tlsSettings").getString("cipherSuites"))
+        assertEquals("ipv4", stream.getJSONObject("sockopt").getString("dialMode"))
+
+        val directOutbound = outbounds.getJSONObject(1)
+        assertEquals("UseIP", directOutbound.getJSONObject("settings").getString("domainStrategy"))
+        val directHappy = directOutbound.getJSONObject("streamSettings").getJSONObject("sockopt").getJSONObject("happyEyeballs")
+        assertEquals(250, directHappy.getInt("tryDelayMs"))
+        assertEquals(2, directHappy.getInt("interleave"))
+    }
+
     private fun inAnyRange(ip: String, ranges: List<String>): Boolean {
         val ipInt = ipToInt(ip)
         return ranges.any { cidr ->
