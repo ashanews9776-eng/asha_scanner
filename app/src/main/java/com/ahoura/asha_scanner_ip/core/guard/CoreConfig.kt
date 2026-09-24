@@ -137,7 +137,8 @@ object CoreConfig {
             put("log_level", text("log_level", "info"))
             put("perf_profile", text("perf_profile", "auto"))
             put("h2_fragmentation", text("h2_fragmentation", "on") == "on")
-            putOpt("dns_servers", text("dns_servers").ifBlank { null })
+            val customUdp = prefs.getString("dns_servers_udp", null)?.ifBlank { null }
+            putOpt("dns_servers", customUdp ?: text("dns_servers").ifBlank { null })
             putOpt("route_block", text("route_block").ifBlank { null })
             putOpt("route_direct", text("route_direct").ifBlank { null })
             putOpt("team", SecureStore.getSecret(context, "zero_trust_team").ifBlank { null })
@@ -273,6 +274,207 @@ object CoreConfig {
      * collide with anything else this app binds.
      */
     const val HTTP_PROXY_PORT = 8080
+
+    const val DNS_PINNED_IPS_PREF = "dns_pinned_ips"
+    private const val PIN_REFRESH_TIMEOUT_MS = 1500L
+    private const val TAG_DNS = "DnsPin"
+
+    /**
+     * Computed pins on launch when absent. See [precomputePinnedIps].
+     */
+    fun ensurePinnedIps(context: Context) {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val lists = listOf("dns_servers_dot", "dns_servers_doh")
+        val hasEncrypted = lists.any { key ->
+            prefs.getString(key, null)?.ifBlank { null } != null
+        }
+        if (!hasEncrypted) return
+        if (prefs.getString(DNS_PINNED_IPS_PREF, null) != null) return
+        precomputePinnedIps(context)
+    }
+
+    /**
+     * Refresh the pins on the connect path and block until they land.
+     */
+    fun refreshPinnedIpsBlocking(context: Context, timeoutMs: Long = PIN_REFRESH_TIMEOUT_MS) {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val lists = listOf("dns_servers_dot", "dns_servers_doh")
+        val hosts = LinkedHashSet<String>()
+        lists.forEach { key ->
+            val raw = prefs.getString(key, null) ?: return@forEach
+            raw.split(',', ';', ' ', '\n', '\r').forEach { entry ->
+                extractHost(entry.trim())?.let { if (it.isNotEmpty()) hosts.add(it) }
+            }
+        }
+        if (hosts.isEmpty()) {
+            prefs.edit().remove(DNS_PINNED_IPS_PREF).apply()
+            return
+        }
+        val latch = java.util.concurrent.CountDownLatch(1)
+        Thread({
+            try {
+                val pinned = resolveHostsToIps(hosts)
+                if (pinned.isEmpty()) {
+                    prefs.edit().remove(DNS_PINNED_IPS_PREF).apply()
+                } else {
+                    prefs.edit().putString(DNS_PINNED_IPS_PREF, pinned).apply()
+                    android.util.Log.i(TAG_DNS, "refreshed ${pinned.split(',').size} resolver pin(s)")
+                }
+            } finally {
+                latch.countDown()
+            }
+        }, "dns-pin-refresh").start()
+        latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+
+    /**
+     * Resolve the DoT/DoH hostnames once, off the UI thread, and cache the result.
+     */
+    fun precomputePinnedIps(context: Context) {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val lists = listOf("dns_servers_dot", "dns_servers_doh")
+        val hosts = LinkedHashSet<String>()
+        lists.forEach { key ->
+            val raw = prefs.getString(key, null) ?: return@forEach
+            raw.split(',', ';', ' ', '\n', '\r').forEach { entry ->
+                extractHost(entry.trim())?.let { if (it.isNotEmpty()) hosts.add(it) }
+            }
+        }
+        if (hosts.isEmpty()) {
+            prefs.edit().remove(DNS_PINNED_IPS_PREF).apply()
+            return
+        }
+        Thread({
+            val pinned = resolveHostsToIps(hosts)
+            if (pinned.isEmpty()) {
+                prefs.edit().remove(DNS_PINNED_IPS_PREF).apply()
+            } else {
+                prefs.edit().putString(DNS_PINNED_IPS_PREF, pinned).apply()
+                android.util.Log.i(TAG_DNS, "pre-resolved ${pinned.split(',').size} resolver IP(s)")
+            }
+        }, "dns-pin").start()
+    }
+
+    private fun resolveHostsToIps(hosts: LinkedHashSet<String>): String {
+        val out = StringBuilder()
+        hosts.forEach { host ->
+            if (host.matches(Regex("^[0-9a-fA-F:.]+$"))) {
+                if (out.isNotEmpty()) out.append(',')
+                out.append(host).append('=').append(host)
+                return@forEach
+            }
+            try {
+                val addrs = java.net.InetAddress.getAllByName(host)
+                val ordered = addrs.sortedBy { it is java.net.Inet6Address }
+                val ips = ordered.map { it.hostAddress }
+                if (ips.isEmpty()) return@forEach
+                if (out.isNotEmpty()) out.append(',')
+                out.append(host).append('=').append(ips.joinToString("+"))
+            } catch (e: Exception) {
+                android.util.Log.w(TAG_DNS, "could not pre-resolve $host: ${e.message}")
+            }
+        }
+        return out.toString()
+    }
+
+    private fun extractHost(entry: String): String? {
+        if (entry.isEmpty()) return null
+        var s = entry
+        arrayOf("https://", "http://", "dot://", "tls://", "doh://").forEach {
+            if (s.startsWith(it, ignoreCase = true)) s = s.substring(it.length)
+        }
+        s = s.substringBefore('/')
+        s = s.substringBefore('?')
+        s = s.substringBeforeLast(':')
+        if (s.startsWith('[') && s.endsWith(']')) s = s.substring(1, s.length - 1)
+        if (s.isEmpty()) return null
+        return s
+    }
+
+    private fun isValidIpv4(value: String): Boolean {
+        val parts = value.split(".", limit = 4)
+        if (parts.size != 4) return false
+        return parts.all { part ->
+            part.isNotEmpty() && part.length <= 3 &&
+                part.all { it.isDigit() } && part.toIntOrNull()?.let { it in 0..255 } == true
+        }
+    }
+
+    private fun isValidHostname(value: String): Boolean {
+        if (value.isEmpty() || value.length > 253) return false
+        return value.split(".")
+            .all { label ->
+                label.isNotEmpty() && label.length <= 63 &&
+                    label.all { it.isLetterOrDigit() || it == '-' } &&
+                    !label.startsWith('-') && !label.endsWith('-')
+            }
+    }
+
+    fun validateDnsEntry(transport: String, entry: String): String? {
+        val raw = entry.trim()
+        if (raw.isEmpty()) return "empty entry"
+
+        when (transport) {
+            "dot" -> {
+                val body = raw.removePrefix("tls://").removePrefix("dot://")
+                    .removePrefix("TLS://").removePrefix("DOT://").trim()
+                if (body == raw.trim()) {
+                    return "DoT entries need the tls:// prefix, e.g. tls://dns.google"
+                }
+                val (host, port) = splitDnsHostPort(body, 853)
+                if (!isValidDnsHost(host)) return "\"$host\" is not an IP or hostname"
+                if (port !in 1..65535) return "port $port is out of range"
+            }
+            "doh" -> {
+                val body = raw.removePrefix("doh:").removePrefix("DOH:").trim()
+                val isHttps = body.startsWith("https://", ignoreCase = true)
+                if (body == raw.trim() && !isHttps) {
+                    return "DoH entries need https:// or the doh: prefix, e.g. https://cloudflare-dns.com/dns-query"
+                }
+                if (isHttps) {
+                    val after = body.substring(8)
+                    val hostPart = after.substringBefore('/').substringBefore('?')
+                    val host = hostPortHost(hostPart)
+                    if (!isValidDnsHost(host)) return "\"$host\" is not an IP or hostname"
+                } else {
+                    val host = hostPortHost(body.substringBefore('/'))
+                    if (!isValidDnsHost(host)) return "\"$host\" is not an IP or hostname"
+                }
+            }
+            else -> {
+                for (prefix in listOf("tls://", "dot://", "https://", "doh:")) {
+                    if (raw.startsWith(prefix, ignoreCase = true)) {
+                        return "this is a $prefix entry — it belongs in the field above for that transport"
+                    }
+                }
+                val (host, port) = splitDnsHostPort(raw, 53)
+                if (!isValidDnsHost(host)) return "\"$host\" is not an IP or hostname"
+                if (port !in 1..65535) return "port $port is out of range"
+            }
+        }
+        return null
+    }
+
+    private fun isValidDnsHost(host: String): Boolean =
+        isValidIpv4(host) || host.contains(':') || isValidHostname(host)
+
+    private fun splitDnsHostPort(entry: String, defaultPort: Int): Pair<String, Int> {
+        if (entry.startsWith('[')) {
+            val close = entry.indexOf(']')
+            if (close <= 0) return entry.substring(1) to defaultPort
+            val host = entry.substring(1, close)
+            val rest = entry.substring(close + 1)
+            val port = rest.removePrefix(":").toIntOrNull() ?: defaultPort
+            return host to port
+        }
+        val colon = entry.lastIndexOf(':')
+        if (colon <= 0) return entry to defaultPort
+        val maybePort = entry.substring(colon + 1).toIntOrNull()
+        if (maybePort == null) return entry to defaultPort
+        return entry.substring(0, colon) to maybePort
+    }
+
+    private fun hostPortHost(entry: String): String = splitDnsHostPort(entry, 443).first
 
     /** Whether the user has opted into exposing the local proxies on the LAN. */
     fun lanSharingEnabled(context: Context): Boolean =

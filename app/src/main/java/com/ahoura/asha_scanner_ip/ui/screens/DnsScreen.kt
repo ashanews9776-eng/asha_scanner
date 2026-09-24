@@ -64,6 +64,7 @@ import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
 import com.ahoura.asha_scanner_ip.ui.theme.AccentBorder
 import com.ahoura.asha_scanner_ip.ui.theme.AccentDim
+import com.ahoura.asha_scanner_ip.ui.theme.AccentMuted
 import com.ahoura.asha_scanner_ip.ui.theme.BlueC
 import com.ahoura.asha_scanner_ip.ui.theme.BorderC
 import com.ahoura.asha_scanner_ip.ui.theme.GoldC
@@ -259,6 +260,11 @@ fun DnsScreen(
                         Pill(if (fa) "اتصال VPN" else "OPEN VPN")
                     }
                 }
+
+                Spacer(Modifier.size(8.dp))
+
+                // ---- StormDNS Auto-Tune (measured MTU profiles) ----
+                StormAutoTuneCard(vm = vm, fa = fa, onOpenVpn = onOpenVpn)
 
                 Spacer(Modifier.size(8.dp))
 
@@ -521,6 +527,171 @@ private fun MetricItem(label: String, value: String, color: Color) {
     }
 }
 
+/**
+ * Auto-Tune card: benchmarks the measured MTU profiles (WhiteDNS approach)
+ * through the user's real resolvers and persists the fastest one.
+ */
+@Composable
+private fun StormAutoTuneCard(vm: ScanViewModel, fa: Boolean, onOpenVpn: () -> Unit) {
+    val s = LocalStrings.current
+    val tune by vm.stormTune.collectAsState()
+    val appliedId by vm.stormPresetId.collectAsState()
+    val presets = if (tune.includeAggressive) {
+        com.ahoura.asha_scanner_ip.core.storm.StormAutoTunePresets.all
+    } else {
+        com.ahoura.asha_scanner_ip.core.storm.StormAutoTunePresets.stable
+    }
+
+    CyberCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (fa) s.stormTune else s.stormTune.uppercase(),
+                    color = Accent,
+                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "${s.stormTuneActive}: ${appliedId ?: "-"}",
+                    color = BlueC,
+                    fontFamily = ShareTechMono,
+                    fontSize = 9.sp,
+                )
+            }
+            Spacer(Modifier.size(4.dp))
+            Text(
+                s.stormTuneDesc,
+                color = TextSecondaryC,
+                fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+            )
+            Spacer(Modifier.size(6.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Aggressive profiles toggle
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (tune.includeAggressive) OrangeC.copy(alpha = 0.15f) else SurfaceC)
+                        .border(0.5.dp, if (tune.includeAggressive) OrangeC else BorderC, RoundedCornerShape(4.dp))
+                        .clickable(enabled = !tune.running) { vm.setStormAggressive(!tune.includeAggressive) }
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                ) {
+                    Text(
+                        s.stormTuneAggressive,
+                        color = if (tune.includeAggressive) OrangeC else TextSecondaryC,
+                        fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                        fontSize = 10.sp,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                // Run / Stop control
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (tune.running) RedC.copy(alpha = 0.12f) else AccentMuted)
+                        .border(0.5.dp, if (tune.running) RedC else AccentBorder, RoundedCornerShape(4.dp))
+                        .clickable {
+                            if (tune.running) vm.stopStormAutoTune() else vm.startStormAutoTune()
+                        }
+                        .padding(horizontal = 12.dp, vertical = 5.dp),
+                ) {
+                    Text(
+                        if (tune.running) {
+                            "${s.stormTuneStop} (${tune.done}/${tune.total})"
+                        } else {
+                            s.stormTuneRun
+                        },
+                        color = if (tune.running) RedC else Accent,
+                        fontFamily = ShareTechMono,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                    )
+                }
+            }
+
+            tune.error?.let { err ->
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    when (err) {
+                        "tune_needs_profile" -> s.stormTuneNeedProfile
+                        "tune_needs_idle" -> s.stormTuneNeedsIdle
+                        else -> err
+                    },
+                    color = RedC,
+                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                    fontSize = 10.sp,
+                )
+            }
+
+            if (tune.results.isNotEmpty()) {
+                Spacer(Modifier.size(6.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    presets.forEach { preset ->
+                        val kbps = tune.results[preset.id]
+                        val isWinner = tune.winnerId == preset.id
+                        val isApplied = appliedId == preset.id
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(if (isWinner) Accent.copy(alpha = 0.08f) else Color.Transparent)
+                                .clickable(enabled = !tune.running) {
+                                    vm.applyStormPreset(preset.id)
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                (if (fa) preset.label else preset.label.uppercase()) +
+                                    if (isWinner) " ⚡" else "",
+                                color = when {
+                                    isWinner -> Accent
+                                    isApplied -> BlueC
+                                    else -> TextPrimaryC
+                                },
+                                fontFamily = ShareTechMono,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                            )
+                            val errText = tune.errors[preset.id]
+                            Text(
+                                when {
+                                    kbps != null -> "$kbps KB/s"
+                                    tune.results.containsKey(preset.id) && errText != null -> "×"
+                                    else -> "·"
+                                },
+                                color = when {
+                                    kbps != null && kbps >= 20 -> AccentDim
+                                    kbps != null -> OrangeC
+                                    tune.results.containsKey(preset.id) -> RedC
+                                    else -> TextMutedC
+                                },
+                                fontFamily = ShareTechMono,
+                                fontSize = 10.sp,
+                            )
+                        }
+                    }
+                }
+                if (tune.winnerId != null && !tune.running) {
+                    Spacer(Modifier.size(4.dp))
+                    Text(
+                        s.stormTuneApplied,
+                        color = AccentDim,
+                        fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                        fontSize = 9.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun CategoryFilterChip(
     label: String,
@@ -630,16 +801,19 @@ private fun ResolverRow(
 
         val msText = when {
             latency != null -> "$latency ms"
+            result?.nativeValid == true -> "✓"
             result != null -> "—"
             else -> "·"
         }
         Text(
             msText,
             color = when {
-                latency == null -> if (result != null) RedC else TextFadedC
-                latency < 60 -> AccentDim
-                latency < 150 -> OrangeC
-                else -> RedC
+                latency != null && latency < 60 -> AccentDim
+                latency != null && latency < 150 -> OrangeC
+                latency != null -> RedC
+                result?.nativeValid == true -> AccentDim
+                result != null -> RedC
+                else -> TextFadedC
             },
             fontFamily = ShareTechMono,
             fontSize = 13.sp,

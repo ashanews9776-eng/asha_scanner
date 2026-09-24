@@ -42,6 +42,12 @@ object DnsProbe {
         val tries: Int = 0,
         val passRate: Double = 0.0,
         val jitterMs: Long = 0L,
+        /**
+         * True when the native StormDNS scan (WD_SCAN event=valid) proved this
+         * resolver carries the real DNS tunnel. Latency is unknown in that
+         * path, so validity must not be inferred from [latencyMs] alone.
+         */
+        val nativeValid: Boolean = false,
     )
 
     /** Validates an IPv4 or IPv6 address string. */

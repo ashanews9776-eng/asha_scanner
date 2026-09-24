@@ -394,29 +394,79 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     private var dnsResolversLoaded = false
     private var dnsTestJob: Job? = null
 
+    /** Native WD_SCAN handle while the WhiteDNS-style engine scan runs. */
+    private var nativeScanHandle: com.ahoura.asha_scanner_ip.core.storm.StormResolverScan.ScanHandle? = null
+
+    /** The big WhiteDNS pool (default_resolvers.txt) merged into the Tuner? */
+    private var bigPoolLoaded = false
+
+    /** Persisted native-scan valid set (ScannerResultStore), lazily loaded. */
+    private var persistedValid: Set<String> = emptySet()
+
     /** Load bundled and user-saved custom resolver lists. */
     fun loadDnsResolvers() {
         if (dnsResolversLoaded) return
         dnsResolversLoaded = true
         viewModelScope.launch(Dispatchers.IO) {
-            val bundled = readAssetLines("dns_resolvers.txt").mapNotNull { DnsProbe.parseResolverLine(it) }
+            val curated = readAssetLines("dns_resolvers.txt").mapNotNull { DnsProbe.parseResolverLine(it) }
             val savedCustomText = settings.customDnsResolvers.first()
             val custom = savedCustomText.lines().mapNotNull { DnsProbe.parseResolverLine(it) }.map {
                 it.copy(category = DnsProbe.ResolverCategory.CUSTOM)
             }
             val workers = settings.dnsWorkerCount.first()
-            val all = (bundled + custom).distinctBy { it.ip }
+
+            // Big WhiteDNS pool, loaded once per process and tagged with the
+            // Iran ranges from geoip.dat so the category filter covers it.
+            var irTable: com.ahoura.asha_scanner_ip.core.ipsrc.IrRangeTable? = null
+            val bigPool: List<DnsProbe.ResolverDef> = if (bigPoolLoaded) {
+                emptyList()
+            } else {
+                bigPoolLoaded = true
+                irTable = runCatching {
+                    getApplication<Application>().assets.open("geoip.dat")
+                        .use { com.ahoura.asha_scanner_ip.core.ipsrc.IrRangeTable.load(it) }
+                }.getOrNull()
+                readAssetLines("default_resolvers.txt").mapNotNull { line ->
+                    DnsProbe.parseResolverLine(line)?.let { def ->
+                        val isIr = irTable?.containsIpv4(def.ip) == true
+                        def.copy(
+                            category = if (isIr) DnsProbe.ResolverCategory.ANTI_SANCTION
+                            else DnsProbe.ResolverCategory.GLOBAL,
+                        )
+                    }
+                }
+            }
+
+            // Restore previously scan-validated resolvers so resume spans
+            // process restarts (upstream ScannerResultStore semantics).
+            persistedValid = com.ahoura.asha_scanner_ip.core.storm.StormResolverScan
+                .ScannerResultStore(java.io.File(getApplication<Application>().filesDir, "dns_scan_valid.txt"))
+                .load()
+
+            val all = (curated + bigPool + custom).distinctBy { it.ip }
+            val restoredResults = persistedValid.associateWith { ip ->
+                DnsProbe.ProbeResult(
+                    ip = ip,
+                    name = ip,
+                    nativeValid = true,
+                )
+            }
             _dnsState.update {
                 it.copy(
                     resolvers = all,
+                    results = restoredResults,
                     workerCount = workers,
                     total = all.size,
+                    done = restoredResults.size,
+                    valid = restoredResults.size,
                 )
             }
         }
     }
 
-    /** Start or resume parallel resolver probing (lane-capped with workerCount). */
+    /** Start or resume resolver scanning. Prefers the WhiteDNS-ported native
+     *  engine (proves each resolver carries the real DNS tunnel) when a
+     *  StormDNS profile is available; falls back to the UDP prober otherwise. */
     fun startDnsScan(resume: Boolean = false) {
         val allResolvers = _dnsState.value.resolvers
         if (allResolvers.isEmpty() || _dnsState.value.isRunning) return
@@ -431,6 +481,11 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             _dnsState.update { it.copy(status = DnsScanStatus.COMPLETED) }
             return
         }
+
+        val profile = activeProfile.value?.proxy
+        val nativeEligible = profile != null &&
+            profile.protocol == com.ahoura.asha_scanner_ip.core.model.Protocol.STORMDNS &&
+            !com.ahoura.asha_scanner_ip.core.vpn.VpnManager.stats.value.status.isActive
 
         dnsTestJob?.cancel()
         dnsTestJob = viewModelScope.launch {
@@ -455,31 +510,113 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             try {
-                DnsProbe.probeAll(
-                    resolvers = resolversToProbe,
-                    domain = _dnsState.value.targetDomain,
-                    concurrency = _dnsState.value.workerCount,
-                ) { result ->
-                    _dnsState.update { curr ->
-                        val isValid = result.latencyMs != null
-                        curr.copy(
-                            results = curr.results + (result.ip to result),
-                            done = curr.done + 1,
-                            valid = if (isValid) curr.valid + 1 else curr.valid,
-                            rejected = if (!isValid) curr.rejected + 1 else curr.rejected,
-                        )
+                if (nativeEligible && profile != null) {
+                    runNativeScan(profile, resolversToProbe.map { it.ip })
+                } else {
+                    DnsProbe.probeAll(
+                        resolvers = resolversToProbe,
+                        domain = _dnsState.value.targetDomain,
+                        concurrency = _dnsState.value.workerCount,
+                    ) { result ->
+                        _dnsState.update { curr ->
+                            val isValid = result.latencyMs != null
+                            curr.copy(
+                                results = curr.results + (result.ip to result),
+                                done = curr.done + 1,
+                                valid = if (isValid) curr.valid + 1 else curr.valid,
+                                rejected = if (!isValid) curr.rejected + 1 else curr.rejected,
+                            )
+                        }
                     }
                 }
+                persistScanResults()
                 _dnsState.update { it.copy(status = DnsScanStatus.COMPLETED) }
             } catch (_: CancellationException) {
+                persistScanResults()
                 _dnsState.update { it.copy(status = DnsScanStatus.PAUSED) }
             }
         }
     }
 
+    /** Native WD_SCAN scan over the real DNS tunnel; events feed dnsState. */
+    private suspend fun runNativeScan(
+        profile: com.ahoura.asha_scanner_ip.core.model.ProxyConfig,
+        ips: List<String>,
+    ) {
+        val store = com.ahoura.asha_scanner_ip.core.storm.StormResolverScan
+            .ScannerResultStore(java.io.File(getApplication<Application>().filesDir, "dns_scan_valid.txt"))
+        val validSoFar = java.util.Collections.synchronizedSet(HashSet(persistedValid))
+        val handle = com.ahoura.asha_scanner_ip.core.storm.StormResolverScan.start(
+            context = getApplication(),
+            domain = profile.address,
+            encryptionKey = profile.password,
+            encryptionMethod = profile.encryption.toIntOrNull() ?: 1,
+            engine = profile.dnsEngine(),
+            resolvers = ips,
+            workerCount = _dnsState.value.workerCount,
+        ) { telemetry ->
+            when (telemetry) {
+                is com.ahoura.asha_scanner_ip.core.storm.StormResolverScan.ScanTelemetry.Valid -> {
+                    validSoFar.add(telemetry.resolver)
+                    _dnsState.update { curr ->
+                        curr.copy(
+                            results = curr.results + (telemetry.resolver to DnsProbe.ProbeResult(
+                                ip = telemetry.resolver,
+                                name = telemetry.resolver,
+                                nativeValid = true,
+                            )),
+                            done = curr.done + 1,
+                            valid = curr.valid + 1,
+                        )
+                    }
+                }
+                is com.ahoura.asha_scanner_ip.core.storm.StormResolverScan.ScanTelemetry.Rejected -> {
+                    _dnsState.update { curr ->
+                        curr.copy(
+                            results = curr.results + (telemetry.resolver to DnsProbe.ProbeResult(
+                                ip = telemetry.resolver,
+                                name = telemetry.resolver,
+                            )),
+                            done = curr.done + 1,
+                            rejected = curr.rejected + 1,
+                        )
+                    }
+                }
+                else -> Unit
+            }
+        } ?: run {
+            // No binary / nothing to scan — surface as completed fallback.
+            return
+        }
+        nativeScanHandle = handle
+        try {
+            // The runner threads exit on their own once every chunk process
+            // ends (the engine exits after the complete event).
+            while (handle.isAlive() && _dnsState.value.isRunning) {
+                kotlinx.coroutines.delay(500)
+            }
+        } finally {
+            handle.cancel()
+            nativeScanHandle = null
+            persistedValid = validSoFar.toSet()
+        }
+    }
+
+    /** Persists the native-scan valid set for resume across restarts. */
+    private fun persistScanResults() {
+        val validIps = _dnsState.value.results
+            .filter { it.value.nativeValid || it.value.latencyMs != null }
+            .keys
+        if (validIps.isEmpty()) return
+        com.ahoura.asha_scanner_ip.core.storm.StormResolverScan
+            .ScannerResultStore(java.io.File(getApplication<Application>().filesDir, "dns_scan_valid.txt"))
+            .save(validIps)
+    }
+
     /** Gracefully stops an active DNS scan. */
     fun stopDnsScan() {
         dnsTestJob?.cancel()
+        nativeScanHandle?.cancel()
         _dnsState.update { it.copy(status = DnsScanStatus.PAUSED) }
     }
 
@@ -559,6 +696,111 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     fun applyDns(ip: String) {
         viewModelScope.launch { settings.setVpnDnsIp(ip) }
+    }
+
+    // ---- StormDNS Auto-Tune (ported from WhiteDNS) ----
+
+    data class StormTuneState(
+        val running: Boolean = false,
+        val includeAggressive: Boolean = false,
+        /** presetId -> measured KB/s (null = the profile failed to carry data). */
+        val results: Map<String, Long?> = emptyMap(),
+        val errors: Map<String, String> = emptyMap(),
+        val done: Int = 0,
+        val total: Int = 0,
+        val winnerId: String? = null,
+        val appliedId: String? = null,
+        val error: String? = null,
+    )
+
+    private val _stormTune = MutableStateFlow(StormTuneState())
+    val stormTune: StateFlow<StormTuneState> = _stormTune.asStateFlow()
+
+    val stormPresetId: StateFlow<String> = settings.stormPresetId
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "iran-average")
+
+    private var stormTuneJob: Job? = null
+
+    fun setStormAggressive(include: Boolean) {
+        if (!_stormTune.value.running) {
+            _stormTune.update { it.copy(includeAggressive = include) }
+        }
+    }
+
+    fun applyStormPreset(id: String) {
+        viewModelScope.launch {
+            settings.setStormPresetId(id)
+            _stormTune.update { it.copy(appliedId = id) }
+        }
+    }
+
+    fun startStormAutoTune() {
+        val s = _stormTune.value
+        if (s.running) return
+        if (com.ahoura.asha_scanner_ip.core.vpn.VpnManager.stats.value.status.isActive) {
+            _stormTune.update { it.copy(error = "tune_needs_idle") }
+            return
+        }
+        val profile = activeProfile.value
+        val proxy = profile?.proxy
+        if (proxy == null || proxy.protocol != com.ahoura.asha_scanner_ip.core.model.Protocol.STORMDNS) {
+            _stormTune.update { it.copy(error = "tune_needs_profile") }
+            return
+        }
+
+        stormTuneJob = viewModelScope.launch(Dispatchers.IO) {
+            val presets = if (s.includeAggressive) {
+                com.ahoura.asha_scanner_ip.core.storm.StormAutoTunePresets.all
+            } else {
+                com.ahoura.asha_scanner_ip.core.storm.StormAutoTunePresets.stable
+            }
+            _stormTune.update {
+                it.copy(
+                    running = true, error = null, winnerId = null,
+                    results = emptyMap(), errors = emptyMap(),
+                    done = 0, total = presets.size,
+                )
+            }
+
+            // Same resolver merge the connect path uses: bundled WhiteDNS list +
+            // curated shortlist + the user's own entries.
+            val customText = runCatching { settings.customDnsResolvers.first() }.getOrDefault("")
+            val defaultLines = runCatching { readAssetLines("default_resolvers.txt") }.getOrDefault(emptyList())
+            val curatedLines = runCatching { readAssetLines("dns_resolvers.txt") }.getOrDefault(emptyList())
+            val resolverIps = (defaultLines + curatedLines + customText.lines())
+                .mapNotNull { DnsProbe.parseResolverLine(it)?.ip }
+                .distinct()
+
+            val manager = com.ahoura.asha_scanner_ip.core.storm.StormDnsProcessManager(getApplication())
+            val winner = com.ahoura.asha_scanner_ip.core.storm.StormAutoTune.runTune(
+                manager = manager,
+                domain = proxy.address,
+                encryptionKey = proxy.password,
+                encryptionMethod = proxy.encryption.toIntOrNull() ?: 1,
+                resolverIps = resolverIps,
+                engine = proxy.dnsEngine(),
+                presets = presets,
+                isCancelled = { !_stormTune.value.running },
+            ) { preset, kbps, error ->
+                _stormTune.update {
+                    it.copy(
+                        results = it.results + (preset.id to kbps),
+                        errors = if (error != null) it.errors + (preset.id to error) else it.errors,
+                        done = it.done + 1,
+                    )
+                }
+            }
+
+            val applied = winner?.id ?: _stormTune.value.appliedId
+            if (winner != null) {
+                settings.setStormPresetId(winner.id)
+            }
+            _stormTune.update { it.copy(running = false, winnerId = winner?.id, appliedId = applied) }
+        }
+    }
+
+    fun stopStormAutoTune() {
+        _stormTune.update { it.copy(running = false) }
     }
 
     // Built-in open-site fallback domains from assets/cf_domains.txt. Kept apart
