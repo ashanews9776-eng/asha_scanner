@@ -94,6 +94,7 @@ class AshaVpnService : GuardVpnService() {
                             runCatching { android.system.Os.unsetenv("AETHER_WIW_INNER_PEER") }
                         }
 
+                        CoreConfig.refreshPinnedIpsBlocking(this@AshaVpnService)
                         val tunnelIntent = Intent(this, AshaVpnService::class.java).apply {
                             action = ACTION_CONNECT
                             val config = CoreConfig.json(this@AshaVpnService, effectiveProto)
@@ -194,12 +195,20 @@ class AshaVpnService : GuardVpnService() {
                     val allLines = defaultLines + curatedLines + customText.lines()
                     val resolverIps = allLines.mapNotNull { com.ahoura.asha_scanner_ip.core.dns.DnsProbe.parseResolverLine(it)?.ip }.distinct()
 
+                    // The auto-tuned MTU profile — falls back to the balanced
+                    // default when the stored id no longer matches a preset.
+                    val tunePreset = runCatching {
+                        SettingsStore(applicationContext).stormPresetId.first()
+                    }.getOrDefault("iran-average")
+                        .let { com.ahoura.asha_scanner_ip.core.storm.StormAutoTunePresets.byId(it) }
+
                     stormDnsManager.start(
                         domain = proxy.address,
                         encryptionKey = proxy.password,
                         encryptionMethod = proxy.encryption.toIntOrNull() ?: 1,
                         resolverIps = resolverIps,
                         engine = engine,
+                        tune = tunePreset,
                     )
                     val ready = stormDnsManager.waitForPort(timeoutMillis = 35_000)
                     if (!ready) {

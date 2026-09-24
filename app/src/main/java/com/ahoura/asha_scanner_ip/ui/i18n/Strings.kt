@@ -192,6 +192,16 @@ interface AppStrings {
     val dnsTargetDomain: String
     val dnsWarningHighWorkers: String
     val dnsSearchHint: String
+    // StormDNS Auto-Tune (measured MTU profiles)
+    val stormTune: String
+    val stormTuneDesc: String
+    val stormTuneRun: String
+    val stormTuneStop: String
+    val stormTuneAggressive: String
+    val stormTuneApplied: String
+    val stormTuneNeedProfile: String
+    val stormTuneNeedsIdle: String
+    val stormTuneActive: String
     // Asha Guard Anti-Censorship Transports & Modes
     val transportWireguard: String
     val transportWireguardDesc: String
@@ -451,6 +461,15 @@ internal object EN : AppStrings {
     override val dnsTargetDomain: String = "Probe Target"
     override val dnsWarningHighWorkers: String = "High worker count may increase network jitter."
     override val dnsSearchHint: String = "Search name or IP..."
+    override val stormTune: String = "StormDNS Auto-Tune"
+    override val stormTuneDesc: String = "Tests measured MTU profiles on your carrier and keeps the fastest one for the DNS tunnel. Needs an active StormDNS profile; run while the VPN is off."
+    override val stormTuneRun: String = "RUN AUTO-TUNE"
+    override val stormTuneStop: String = "STOP"
+    override val stormTuneAggressive: String = "Include aggressive"
+    override val stormTuneApplied: String = "Applied. Reconnect the DNS tunnel to switch."
+    override val stormTuneNeedProfile: String = "Select a StormDNS / CottenDNS profile first"
+    override val stormTuneNeedsIdle: String = "Disconnect the VPN before running auto-tune"
+    override val stormTuneActive: String = "ACTIVE PRESET"
     // Asha Guard Anti-Censorship Transports & Modes
     override val transportWireguard: String = "WireGuard"
     override val transportWireguardDesc: String = "Fast direct UDP Noise protocol"
@@ -710,6 +729,15 @@ internal object FA : AppStrings {
     override val dnsTargetDomain: String = "دامنه تست"
     override val dnsWarningHighWorkers: String = "تعداد زیاد ورکر ممکن است جیتر شبکه را افزایش دهد."
     override val dnsSearchHint: String = "جستجوی نام یا آی‌پی..."
+    override val stormTune: String = "تنظیم خودکار StormDNS"
+    override val stormTuneDesc: String = "پروفایل‌های MTU اندازه‌گیری‌شده را روی اپراتور تو تست می‌کند و سریع‌ترین را برای تونل DNS نگه می‌دارد. به یک پروفایل StormDNS فعال نیاز دارد و باید VPN خاموش باشد."
+    override val stormTuneRun: String = "اجرای تنظیم خودکار"
+    override val stormTuneStop: String = "توقف"
+    override val stormTuneAggressive: String = "شامل حالت تهاجمی"
+    override val stormTuneApplied: String = "اعمال شد. برای تغییر، تونل DNS را دوباره وصل کنید."
+    override val stormTuneNeedProfile: String = "اول یک پروفایل StormDNS / CottenDNS انتخاب کنید"
+    override val stormTuneNeedsIdle: String = "قبل از اجرای تنظیم خودکار، VPN را قطع کنید"
+    override val stormTuneActive: String = "پروفایل فعال"
     // Asha Guard Anti-Censorship Transports & Modes
     override val transportWireguard: String = "وایرگارد"
     override val transportWireguardDesc: String = "پروتکل پرسرعت مستقیم UDP بر پایه Noise"

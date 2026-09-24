@@ -169,6 +169,14 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
     private val connected = AtomicBoolean(false)
     private val stopRequested = AtomicBoolean(false)
     private val vpnModeActive = AtomicBoolean(false)
+    /**
+     * The user paused the tunnel from the notification instead of disconnecting:
+     * the session has been torn down, but the service stays alive with a
+     * Reconnect action waiting for the next tap. Kept distinct from
+     * [userInitiatedStop], which means "stay off" and therefore forbids
+     * reconnect — a pause is defined by the fact that reconnect is still wanted.
+     */
+    private val paused = AtomicBoolean(false)
     private var tun: ParcelFileDescriptor? = null
     private var lastTrafficSampleMs = 0L
     private var currentTx = 0L
@@ -396,6 +404,18 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      * associate in testing.
      */
     private var chainMode = false
+
+    /**
+     * True only for a chain whose inner leg is Psiphon — the one chain shape that
+     * reports its own bytes via [onBytesTransferred].
+     *
+     * [chainMode] is also set for WoW/WireGuard chains, which have no inner
+     * counter at all. Treating those the same way froze the UI's traffic counter
+     * at zero for the whole session, so the verification gate reported "Tunnel
+     * moved no bytes" and tore down tunnels that were passing data. See the
+     * "traffic" handler below.
+     */
+    private var psiphonChained = false
 
     /**
      * True once an outer transport has been accepted and Psiphon started on it.
@@ -685,6 +705,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
 
         const val ACTION_CONNECT = "com.ahoura.asha_scanner_ip.core.guard.CONNECT"
         const val ACTION_DISCONNECT = "com.ahoura.asha_scanner_ip.core.guard.DISCONNECT"
+        const val ACTION_PAUSE = "com.ahoura.asha_scanner_ip.core.guard.PAUSE"
         /**
          * With [ACTION_DISCONNECT]: tear the tunnel down but keep the Service
          * alive (no stopSelf). AshaVpnService uses this when handing the tunnel
@@ -1812,6 +1833,14 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             sendStatus(STATUS_FAILED, detail)
         }
         connected.set(false)
+        // A pause is neither a drop nor a failure, and the chain's bare
+        // outer-leg thread reaches here when the rung it was running is torn
+        // down by the pause itself. Left to fall through, this method ends the
+        // service — which is the whole behaviour a pause must not have.
+        if (paused.get()) {
+            ConnectionLog.record("Paused; the chain's outer-leg failure is ignored")
+            return
+        }
         // Keeping the service alive is a precondition of the seal: stopSelf()
         // releases the blocking TUN's fd and the OS restores carrier networking,
         // which is the leak the switch exists to prevent.
@@ -1923,6 +1952,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 startTunnel(config)
             }
             ACTION_DISCONNECT -> {
+                paused.set(false)
                 // The one place that means "the user wants this off". Auto-reconnect
                 // reads this latch and stays out of the way.
                 userInitiatedStop.set(true)
@@ -1937,19 +1967,35 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 cancelAutoReconnect()
                 stopTunnel(teardownService = !intent.getBooleanExtra(EXTRA_KEEP_SERVICE, false))
             }
+            ACTION_PAUSE -> {
+                paused.set(true)
+                ConnectionLog.record("Pause requested — tunnel down, notification kept")
+                stopTunnel(notify = false, teardownService = false)
+                repostNotification()
+            }
             ACTION_RECONNECT -> {
                 val config = storedConfig
-                if (config != null && connected.get()) {
-                    ConnectionLog.record("Quick reconnect requested")
-                    // Latched BEFORE the teardown, because the teardown is what races
-                    // us. On MASQUE/WireGuard/WoW the core runs inside worker.execute
-                    // and its `finally` ends the service; on every path a failure
-                    // lands in failAndStop, which does the same. Both now read this
-                    // flag and leave the service alive for the restart below.
-                    reconnectRequested.set(true)
-                    // NOT userInitiatedStop: that latch means "stay off", and it
-                    // would make the restart's own auto-reconnect refuse to fire.
-                    stopTunnel(notify = false, teardownService = false)
+                if (config != null && (connected.get() || paused.get())) {
+                    val wasPaused = paused.getAndSet(false)
+                    ConnectionLog.record(
+                        if (connected.get()) "Quick reconnect requested"
+                        else "Reconnect requested after pause"
+                    )
+                    if (wasPaused || !connected.get()) {
+                        userInitiatedStop.set(false)
+                        killSwitchSealed.set(false)
+                        reconnectAttempts = 0
+                        startTunnel(config)
+                    } else {
+                        // Latched BEFORE the teardown, because the teardown is what races
+                        // us. On MASQUE/WireGuard/WoW the core runs inside worker.execute
+                        // and its `finally` ends the service; on every path a failure
+                        // lands in failAndStop, which does the same. Both now read this
+                        // flag and leave the service alive for the restart below.
+                        reconnectRequested.set(true)
+                        // NOT userInitiatedStop: that latch means "stay off", and it
+                        // would make the restart's own auto-reconnect refuse to fire.
+                        stopTunnel(notify = false, teardownService = false)
                     // Off the worker on purpose. `worker` is single-threaded and the
                     // native core occupies it for the whole session, so a task queued
                     // here would not run until the core had exited — which is the
@@ -2019,6 +2065,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                         // sendStatus clears it on CONNECTED, so it cannot outlive the
                         // reconnect it belongs to.
                     }, RECONNECT_SETTLE_MS, TimeUnit.MILLISECONDS)
+                    }
                 }
             }
             ACTION_NOTIFICATION_HEALTH -> {
@@ -2135,14 +2182,15 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 "traffic" -> {
                     val tx = event.getLong("tx")
                     val rx = event.getLong("rx")
-                    // Chained mode has two sets of counters for the same bytes: the
-                    // core's (outer, absolute totals) and Psiphon's (inner, deltas
-                    // via onBytesTransferred). Letting both write here made them
-                    // fight — Psiphon accumulating while the core overwrote. The
-                    // inner leg is the one carrying the user's data, and it is what
-                    // plain Psiphon mode already reports, so the outer leg's
-                    // counters are dropped for consistency.
-                    if (chainMode) return
+                    // But that reasoning only holds when there IS an inner counter.
+                    // Only a Psiphon chain has one. A WoW/WireGuard chain has no
+                    // Psiphon leg at all — onBytesTransferred never fires — and
+                    // dropping the core's counters here left the UI with no source
+                    // whatsoever: trafficRx stayed at zero for the whole session,
+                    // so the 18s verification gate saw "Tunnel moved no bytes" on
+                    // every connect and tore down a tunnel that was passing data.
+                    // Drop the outer counters only when Psiphon is the inner leg.
+                    if (chainMode && psiphonChained) return
                     currentTx = tx
                     currentRx = rx
                     updateTrafficNotification(tx, rx)
@@ -2220,6 +2268,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      */
     private fun startChainTunnel() {
         chainMode = true
+        psiphonChained = true
         chainOuterCommitted = false
         // FALSE in SOCKS mode, and this single line is the difference between the
         // two shapes of a chained run:
@@ -2308,6 +2357,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             } catch (e: Exception) {
                 ConnectionLog.record("Chain start failed: ${e.message}")
                 chainMode = false
+                psiphonChained = false
                 failAndStop(e.message ?: "Chain start failed")
             }
         }
@@ -2486,6 +2536,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 // connect fail with "already running".
                 if (chained) stopOuterLeg()
                 chainMode = false
+                psiphonChained = false
                 failAndStop(e.message ?: "Tor start failed")
             }
         }
@@ -2568,7 +2619,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 RemotePolicy.refreshIfDue(this)
 
                 sendStatus(STATUS_CONNECTING, "Starting device routing…", 70)
-                if (!ShardSocksFront.start(ShardManager.SOCKS_PORT)) {
+                if (!ShardSocksFront.start(ShardManager.SOCKS_PORT, DnsUpstreams.list(this))) {
                     error("Could not start the UDP front-end")
                 }
                 activeSocksPort = ShardSocksFront.LISTEN_PORT
@@ -3012,6 +3063,14 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      * gap so the reconnect does not have to re-prompt the user.
      */
     private fun onTunnelLost(reason: String) {
+        // A pause is not a drop: the tunnel came down because the user asked for it,
+        // and a watchdog firing during the teardown is the expected consequence, not
+        // a reason to reconnect. Every branch below either reconnects or seals the
+        // device, both of which would fight the pause.
+        if (paused.get()) {
+            ConnectionLog.record("Tunnel ended for a pause; no reconnect, no kill switch")
+            return
+        }
         // A quick reconnect tears the old tunnel down on purpose, and on Psiphon the
         // controller's own `onExiting` arrives a moment later — after the restart has
         // cleared stopRequested, so the usual guard no longer covers it. Treating
@@ -3188,7 +3247,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      * failure (red dial, session over) or as a reconnect in progress.
      */
     private fun willAutoReconnect(): Boolean =
-        autoReconnectEnabled() && !userInitiatedStop.get() && storedConfig != null
+        autoReconnectEnabled() && !userInitiatedStop.get() && storedConfig != null && !paused.get()
 
     /**
      * Records that the current PLAIN transport reached the internet on this network.
@@ -3504,6 +3563,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         reconnectTask?.cancel(false)
         reconnectTask = null
         nativeExitWasUnexpected = false
+        paused.set(false)
         storedConfig = config
         currentProtocol = config.substringAfter("\"protocol\":\"").substringBefore('"').uppercase()
         currentVpnIp = ""
@@ -3546,6 +3606,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         // "plain" for recordWorkingPlainTransport(). The branches below set them
         // again for the Psiphon and chained paths.
         chainMode = false
+        psiphonChained = false
         psiphonVpnMode = false
         startAsForeground()
 
@@ -3914,6 +3975,19 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                     // does not need a fresh VPN consent dialog.
                     nativeExitWasUnexpected = false
                     scheduleAutoReconnect("the tunnel dropped")
+                } else if (paused.get()) {
+                    // The user paused from the notification. The tunnel is being torn
+                    // down deliberately and the foreground service is meant to
+                    // survive it, but this thread's own teardown cannot tell that
+                    // from a real failure: stopTunnel(notify=false,
+                    // teardownService=false) leaves no trace on any latch the
+                    // branches above read (stopRequested is a per-session flag that
+                    // startTunnel clears, and reconnectRequested is false because a
+                    // pause is not a retry). Without this branch the final else
+                    // stopForeground()+stopSelf() would run and take the
+                    // notification with it — exactly what a pause must not do.
+                    nativeExitWasUnexpected = false
+                    ConnectionLog.record("Core exited for a pause; notification kept")
                 } else {
                     nativeExitWasUnexpected = false
                     stopForeground(STOP_FOREGROUND_REMOVE)
@@ -3980,6 +4054,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             // a listener that no longer exists.
             NativeCore.detach()
             chainMode = false
+            psiphonChained = false
             chainOuterCommitted = false
             vpnModeActive.set(false)
             // Cleared with the rest of the per-session Psiphon state. It used to be
@@ -4039,6 +4114,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 // connect starts with a core still bound to a dead service.
                 NativeCore.detach()
                 chainMode = false
+                psiphonChained = false
                 chainOuterCommitted = false
             }
             vpnModeActive.set(false)
@@ -4539,6 +4615,19 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             this, 2, reconnectIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // Pause is the action that changes shape. While the
+        // tunnel is up the button offers Pause, which tears the session down but
+        // leaves the service in the foreground so this row survives; while it is
+        // paused the same slot offers Reconnect, which restarts the session from
+        // the config the user last connected with.
+        val isPaused = paused.get()
+        val pauseIntent = Intent(this, this::class.java).apply {
+            action = if (isPaused) ACTION_RECONNECT else ACTION_PAUSE
+        }
+        val pausePendingIntent = PendingIntent.getService(
+            this, 3, pauseIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         // Second line: what is carrying the traffic and where it comes out.
         // Byte counters and speed are deliberately gone from here — see
         // [updateTrafficNotification] for why they were the cause of the
@@ -4589,8 +4678,16 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             // content — the exact case the user is complaining about.
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setOnlyAlertOnce(true)
+            .addAction(
+                android.R.drawable.ic_media_pause,
+                if (isPaused) "Reconnect" else "Pause",
+                pausePendingIntent
+            )
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
-            .addAction(android.R.drawable.ic_menu_revert, "Reconnect", reconnectPendingIntent)
+
+        if (!isPaused) {
+            builder.addAction(android.R.drawable.ic_menu_revert, "Reconnect", reconnectPendingIntent)
+        }
 
         // The session timer, ticked by the system rather than by us.
         //

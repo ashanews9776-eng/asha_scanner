@@ -97,6 +97,15 @@ object ShardSocksFront {
      */
     private val DNS_UPSTREAMS = listOf("1.1.1.1", "8.8.8.8")
 
+    /**
+     * The resolver list [dnsUpstream] actually reads. Set from [start] from the
+     * user's plain-UDP preference; [DEFAULT] until then, which is what a session
+     * that never went through [start] (a reconnect reusing the running
+     * front-end) still sees.
+     */
+    @Volatile
+    private var dnsUpstreams: List<String> = DNS_UPSTREAMS
+
     private const val SOCKS_VERSION = 5
     private const val CMD_CONNECT = 1
     private const val CMD_UDP_ASSOCIATE = 3
@@ -151,7 +160,43 @@ object ShardSocksFront {
     /** After this, a query is abandoned and its slot released. */
     private const val DNS_PENDING_TTL_MS = 5_000L
 
+    /**
+     * The largest UDP payload the SHARD node can actually carry.
+     *
+     * Measured against the live pool from the VPS, one node end to end: datagrams
+     * of 60 and 300 bytes come back, 550 and above never do, and the cutoff is
+     * the same on port 53 as on 443. That makes it a size limit on the
+     * Cloudflare WebSocket leg, not a port policy. The true line sits between the
+     * two, so 500 is a safe working ceiling with a little slack for the response.
+     *
+     * Above it the packet is not slowed or retried — it is dropped on purpose, so
+     * the app sees a dead flow and falls back to TCP instead of hanging on a
+     * probe that can never be answered.
+     */
+    private const val UDP_MAX_PAYLOAD = 500
+
+    /** How often the oversized-UDP diagnosis is written. See [reportOversizedUdp]. */
+    private const val UDP_OVERSIZED_REPORT_INTERVAL_MS = 3_000L
+
     private val running = AtomicBoolean(false)
+
+    /**
+     * Throttles the "UDP too big for this node" log.
+     *
+     * Chrome sends a burst of oversized datagrams at once — one per QUIC flow —
+     * and every one of them would otherwise write a line. The first line is the
+     * diagnosis; the next thirty in the same second are noise that pushes the
+     * user's own connect log out of the ring buffer.
+     */
+    @Volatile private var lastOversizedReport = 0L
+    private fun reportOversizedUdp(payloadSize: Int, destination: String, port: Int) {
+        val now = System.currentTimeMillis()
+        if (now - lastOversizedReport < UDP_OVERSIZED_REPORT_INTERVAL_MS) return
+        lastOversizedReport = now
+        ConnectionLog.record(
+            "$TAG UDP $payloadSize B > $UDP_MAX_PAYLOAD B to $destination:$port — the node's WebSocket leg drops datagrams this big; refusing so the app falls back to TCP"
+        )
+    }
 
     /**
      * The live udpgw stream, so the DNS channel can answer on it.
@@ -262,10 +307,19 @@ object ShardSocksFront {
      * @param socksPort xray's SOCKS listener, i.e. [ShardManager.SOCKS_PORT].
      */
     @Synchronized
-    fun start(socksPort: Int): Boolean {
+    fun start(socksPort: Int, dnsUpstreams: List<String> = emptyList()): Boolean {
         if (running.get()) {
             ConnectionLog.record("$TAG already running")
             return true
+        }
+        // v2.0.17: the user's plain-UDP resolver list now drives SHARD. This was
+        // hardcoded to 1.1.1.1/8.8.8.8, so a custom resolver set on the DNS
+        // screen applied to WireGuard/MASQUE/WoW and was silently ignored here —
+        // the exact inconsistency a user reported as "plain UDP DNS only works
+        // on WireGuard". Reject anything that is not a bare IP: these front-ends
+        // have no TLS stack, so a DoT/DoH URL is a no-op rather than a resolver.
+        if (dnsUpstreams.isNotEmpty()) {
+            this.dnsUpstreams = dnsUpstreams
         }
         upstreamPort = socksPort
 
@@ -568,7 +622,7 @@ object ShardSocksFront {
      * one of them is having a bad minute at the exit.
      */
     private fun dnsUpstream(index: Int): InetAddress =
-        InetAddress.getByName(DNS_UPSTREAMS[index % DNS_UPSTREAMS.size])
+        InetAddress.getByName(dnsUpstreams[index % dnsUpstreams.size])
 
     // -------------------------------------------------------------- DNS channel
 
@@ -620,6 +674,14 @@ object ShardSocksFront {
 
     private fun sendDnsQuery(pending: DnsPending, upstreamIndex: Int) {
         val channel = dnsChannel(upstreamIndex) ?: return
+        // Same 500-byte ceiling as the general UDP path: a query padded past it by
+        // EDNS0 (Chrome does this) would enter the WebSocket leg and vanish, and
+        // the retry thread would send it to the other resolver with the same
+        // result. Dropping it here lets the app re-ask over TCP, which works.
+        if (pending.query.size > UDP_MAX_PAYLOAD) {
+            reportOversizedUdp(pending.query.size, "dns", 53)
+            return
+        }
         val resolver = try {
             dnsUpstream(upstreamIndex)
         } catch (e: Exception) {
@@ -1112,6 +1174,25 @@ object ShardSocksFront {
 
                 association.lastUsed = System.currentTimeMillis()
                 val datagram = encapsulate(sendTo, sendToPort, payload)
+                // The node's Cloudflare WebSocket leg silently drops UDP datagrams
+                // above roughly 500 bytes. Verified against the live pool from the
+                // VPS: payloads of 60/300 bytes answer, 550+ never come back —
+                // regardless of destination port, so it is a size limit on the
+                // transport, not a port block. Chrome is the casualty: its QUIC
+                // initial (~1200 B) and its EDNS0-padded DNS both cross that line,
+                // so the query enters the TUN and vanishes. Chrome then waits on a
+                // probe that will never answer instead of falling back to TCP,
+                // which is why a tunnel that carries Telegram fine cannot open a
+                // single page.
+                //
+                // Refusing here is the fix: tun2socks gets an explicit failure on
+                // the flow, lwIP reports it to the app, and the app falls back to
+                // TCP immediately. Chrome recovers in under a second; apps that
+                // only ever send small UDP keep working untouched.
+                if (payload.size > UDP_MAX_PAYLOAD) {
+                    reportOversizedUdp(payload.size, sendTo.hostAddress, sendToPort)
+                    continue
+                }
                 try {
                     association.udp.send(
                         DatagramPacket(

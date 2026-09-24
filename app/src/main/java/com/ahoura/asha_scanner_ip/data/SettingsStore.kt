@@ -21,6 +21,7 @@ class SettingsStore(private val context: Context) {
     private val keyVpnDnsIp = stringPreferencesKey("vpn_dns_ip")
     private val keyCustomDns = stringPreferencesKey("custom_dns_resolvers")
     private val keyDnsWorkerCount = androidx.datastore.preferences.core.intPreferencesKey("dns_worker_count")
+    private val keyStormPresetId = stringPreferencesKey("storm_tune_preset_id")
 
     private val safePrefsFlow: Flow<androidx.datastore.preferences.core.Preferences> = context.dataStore.data
         .catch { exception ->
@@ -59,6 +60,12 @@ class SettingsStore(private val context: Context) {
         prefs[keyDnsWorkerCount] ?: 8
     }
 
+    // StormDNS auto-tune preset applied at connect; "iran-average" until the
+    // tuner measures a faster one on this carrier.
+    val stormPresetId: Flow<String> = safePrefsFlow.map { prefs ->
+        prefs[keyStormPresetId] ?: "iran-average"
+    }
+
     suspend fun setLanguage(lang: Lang) {
         runCatching {
             context.dataStore.edit { it[keyLang] = lang.code }
@@ -86,6 +93,12 @@ class SettingsStore(private val context: Context) {
     suspend fun setDnsWorkerCount(workers: Int) {
         runCatching {
             context.dataStore.edit { it[keyDnsWorkerCount] = workers.coerceIn(1, 32) }
+        }
+    }
+
+    suspend fun setStormPresetId(id: String) {
+        runCatching {
+            context.dataStore.edit { it[keyStormPresetId] = id }
         }
     }
 }

@@ -69,7 +69,8 @@ class StormDnsProcessManager(private val context: Context) {
 
     /**
      * Starts StormDNS / CottenDNS process pointing to the specified target domain and encryption parameters,
-     * using the provided list of resolver IPs.
+     * using the provided list of resolver IPs. [tune] applies an auto-tune MTU
+     * profile; null keeps the built-in defaults.
      */
     @Synchronized
     fun start(
@@ -79,6 +80,7 @@ class StormDnsProcessManager(private val context: Context) {
         resolverIps: List<String>,
         socksPort: Int = SOCKS_PORT,
         engine: String = "stormdns",
+        tune: DnsTunePreset? = null,
     ) {
         stop()
 
@@ -97,7 +99,7 @@ class StormDnsProcessManager(private val context: Context) {
         }
 
         resolversFile.writeText(effectiveResolvers.joinToString("\n"))
-        configFile.writeText(renderTomlConfig(domain, encryptionKey, encryptionMethod, socksPort, engine))
+        configFile.writeText(renderStormToml(domain, encryptionKey, encryptionMethod, socksPort, engine, tune))
 
         lastError = null
         activeConfigFile = configFile
@@ -220,83 +222,6 @@ class StormDnsProcessManager(private val context: Context) {
     private fun cleanupStaleFiles(dir: File) {
         dir.listFiles()?.filter { it.name.startsWith(".storm-") }?.forEach {
             runCatching { it.delete() }
-        }
-    }
-
-    private fun renderTomlConfig(
-        domain: String,
-        encryptionKey: String,
-        encryptionMethod: Int,
-        socksPort: Int,
-        engine: String = "stormdns",
-    ): String = buildString {
-        appendLine("DOMAINS = [\"${domain.trim().trimEnd('.')}\"]")
-        appendLine("DATA_ENCRYPTION_METHOD = $encryptionMethod")
-        appendLine("ENCRYPTION_KEY = \"${encryptionKey.trim()}\"")
-        appendLine("PROTOCOL_TYPE = \"udp\"")
-        appendLine("LISTEN_IP = \"127.0.0.1\"")
-        appendLine("LISTEN_PORT = $socksPort")
-        appendLine("SOCKS5_AUTH = false")
-        appendLine("SOCKS5_USER = \"\"")
-        appendLine("SOCKS5_PASS = \"\"")
-        appendLine("LOCAL_DNS_ENABLED = false")
-        appendLine("LOCAL_DNS_IP = \"127.0.0.1\"")
-        appendLine("LOCAL_DNS_PORT = 0")
-        appendLine("RESOLVER_BALANCING_STRATEGY = 1")
-        appendLine("UPLOAD_PACKET_DUPLICATION_COUNT = 0")
-        appendLine("DOWNLOAD_PACKET_DUPLICATION_COUNT = 0")
-        appendLine("UPLOAD_COMPRESSION_TYPE = 1")
-        appendLine("DOWNLOAD_COMPRESSION_TYPE = 1")
-        appendLine("BASE_ENCODE_DATA = true")
-        appendLine("MIN_UPLOAD_MTU = 40")
-        appendLine("MIN_DOWNLOAD_MTU = 300")
-        appendLine("MAX_UPLOAD_MTU = 140")
-        appendLine("MAX_DOWNLOAD_MTU = 3000")
-        appendLine("MTU_TEST_RETRIES_RESOLVERS = 3")
-        appendLine("MTU_TEST_TIMEOUT_RESOLVERS = 2.5")
-        appendLine("MTU_TEST_PARALLELISM_RESOLVERS = 100")
-        appendLine("MTU_TEST_RETRIES_LOGS = 5")
-        appendLine("MTU_TEST_TIMEOUT_LOGS = 2.5")
-        appendLine("MTU_TEST_PARALLELISM_LOGS = 32")
-        appendLine("RX_TX_WORKERS = 4")
-        appendLine("TUNNEL_PROCESS_WORKERS = 4")
-        appendLine("TUNNEL_PACKET_TIMEOUT_SECONDS = 10.0")
-        appendLine("DISPATCHER_IDLE_POLL_INTERVAL_SECONDS = 0.020")
-        appendLine("TX_CHANNEL_SIZE = 2048")
-        appendLine("RX_CHANNEL_SIZE = 2048")
-        appendLine("RESOLVER_UDP_CONNECTION_POOL_SIZE = 64")
-        appendLine("STREAM_QUEUE_INITIAL_CAPACITY = 1024")
-        appendLine("ORPHAN_QUEUE_INITIAL_CAPACITY = 256")
-        appendLine("DNS_RESPONSE_FRAGMENT_STORE_CAPACITY = 256")
-        appendLine("MAX_ACTIVE_STREAMS = 256")
-        appendLine("LOCAL_HANDSHAKE_TIMEOUT_SECONDS = 15")
-        appendLine("SOCKS_UDP_ASSOCIATE_READ_TIMEOUT_SECONDS = 30")
-        appendLine("CLIENT_TERMINAL_STREAM_RETENTION_SECONDS = 60")
-        appendLine("CLIENT_CANCELLED_SETUP_RETENTION_SECONDS = 15")
-        appendLine("SESSION_INIT_RETRY_BASE_SECONDS = 1")
-        appendLine("SESSION_INIT_RETRY_STEP_SECONDS = 1")
-        appendLine("SESSION_INIT_RETRY_LINEAR_AFTER = 5")
-        appendLine("SESSION_INIT_RETRY_MAX_SECONDS = 10")
-        appendLine("SESSION_INIT_BUSY_RETRY_INTERVAL_SECONDS = 1")
-        appendLine("STARTUP_MODE = \"resolvers\"")
-        appendLine("LOG_SCAN_MAX_DAYS = 14")
-        appendLine("LOG_SCAN_MAX_RESOLVERS = 128")
-        appendLine("LOG_BASED_MTU_VERIFY = true")
-        appendLine("STATS_REPORT_INTERVAL_SECONDS = 1.0")
-        appendLine("PING_WATCHDOG_TIMEOUT_SECONDS = 30")
-        appendLine("LOG_LEVEL = \"info\"")
-        appendLine("LOG_TO_FILE = false")
-        appendLine("LOG_DIR = \"logs\"")
-
-        if (engine.equals("cottendns", ignoreCase = true)) {
-            appendLine("CONFIG_PRESET = \"performance\"")
-            appendLine("LEGACY_SESSION_ID = false")
-            appendLine("RESOLVER_TRANSPORT = \"udp\"")
-            appendLine("QUERY_TYPES = [\"TXT\"]")
-            appendLine("QNAME_LABEL_LENGTH = 63")
-            appendLine("FAST_CONNECT = true")
-            appendLine("MTU_BACKGROUND_PARALLELISM = 10")
-            appendLine("RESOLVER_RATE_LIMIT_ENABLED = true")
         }
     }
 }
