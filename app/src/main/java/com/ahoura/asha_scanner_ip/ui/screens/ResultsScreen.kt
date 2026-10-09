@@ -85,6 +85,21 @@ import com.ahoura.asha_scanner_ip.ui.theme.TextSecondaryC
 import com.ahoura.asha_scanner_ip.ui.theme.Vazirmatn
 import com.ahoura.asha_scanner_ip.ui.theme.displayFamily
 import com.ahoura.asha_scanner_ip.ui.theme.monoFamily
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.ahoura.asha_scanner_ip.core.vpn.VpnManager
+
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
 
 @Composable
 fun ResultsScreen(
@@ -108,6 +123,31 @@ fun ResultsScreen(
     var traceResult by remember { mutableStateOf<ScanResult?>(null) }
     var actionResult by remember { mutableStateOf<ScanResult?>(null) }
     var showLegend by remember { mutableStateOf(false) }
+
+    var pendingWarp by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
+    val vpnLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            pendingWarp?.let { (ip, port, trans) ->
+                vm.connectWithScannedIpAsWarp(context, ip, port, trans)
+                onOpenVpn?.invoke()
+            }
+        }
+        pendingWarp = null
+    }
+
+    fun startWarpTransport(ip: String, port: Int, transport: String) {
+        val activity = context.findActivity()
+        val prepIntent = activity?.let { VpnManager.prepareVpn(it) }
+        if (prepIntent != null) {
+            pendingWarp = Triple(ip, port, transport)
+            vpnLauncher.launch(prepIntent)
+        } else {
+            vm.connectWithScannedIpAsWarp(context, ip, port, transport)
+            onOpenVpn?.invoke()
+        }
+    }
 
     LaunchedEffect(snack) { if (snack != null) { kotlinx.coroutines.delay(1800); snack = null } }
 
@@ -193,12 +233,10 @@ fun ResultsScreen(
                             Spacer(Modifier.size(8.dp))
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 ActionBtn("WARP (WG)", Accent, AccentMuted, AccentBorder, Modifier.weight(1f)) {
-                                    vm.connectWithScannedIpAsWarp(context, best.ip, best.port, "wireguard")
-                                    onOpenVpn?.invoke()
+                                    startWarpTransport(best.ip, best.port, "wireguard")
                                 }
                                 ActionBtn("MASQUE", BlueC, BlueC.copy(alpha = 0.08f), BlueC.copy(alpha = 0.4f), Modifier.weight(1f)) {
-                                    vm.connectWithScannedIpAsWarp(context, best.ip, best.port, "masque")
-                                    onOpenVpn?.invoke()
+                                    startWarpTransport(best.ip, best.port, "masque")
                                 }
                                 if (proxy != null && onConnectVpn != null) {
                                     ActionBtn("CUSTOM", GoldC, GoldC.copy(alpha = 0.08f), GoldC.copy(alpha = 0.4f), Modifier.weight(1f)) {
@@ -324,14 +362,12 @@ fun ResultsScreen(
                 r = r,
                 hasConfig = proxy != null,
                 onConnectWarp = {
-                    vm.connectWithScannedIpAsWarp(context, r.ip, r.port, "wireguard")
+                    startWarpTransport(r.ip, r.port, "wireguard")
                     actionResult = null
-                    onOpenVpn?.invoke()
                 },
                 onConnectMasque = {
-                    vm.connectWithScannedIpAsWarp(context, r.ip, r.port, "masque")
+                    startWarpTransport(r.ip, r.port, "masque")
                     actionResult = null
-                    onOpenVpn?.invoke()
                 },
                 onConnectCustom = if (proxy != null && onConnectVpn != null) {
                     {

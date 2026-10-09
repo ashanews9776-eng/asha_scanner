@@ -3948,9 +3948,15 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 val manualEndpoint = prefs.getString("manual_endpoint", null)?.trim().orEmpty()
                 val storedCleanIp = prefs.getString("clean_ip", null)?.trim().orEmpty()
                 val rawCleanIp = manualEndpoint.takeIf { it.isNotBlank() }
-                    ?: storedCleanIp.takeIf { it.isNotBlank() }
-                val chosenEnrollIp = CoreConfig.formatPeerForProtocol(rawCleanIp, currentProtocol)
-                val enrollHost = rawCleanIp?.substringBefore(":")?.takeIf { it.isNotBlank() } ?: "162.159.192.1"
+                    ?: storedCleanIp.takeIf { it.isNotBlank() && CoreConfig.isWarpEndpoint(it) }
+                val chosenEnrollIp = if (rawCleanIp != null) CoreConfig.formatPeerForProtocol(rawCleanIp, currentProtocol) else null
+                val enrollHost = if (manualEndpoint.isNotBlank()) {
+                    manualEndpoint.substringBefore(":")
+                } else if (rawCleanIp != null) {
+                    rawCleanIp.substringBefore(":")
+                } else {
+                    "162.159.192.1"
+                }
                 val enrollAddress = "$enrollHost:443"
                 runCatching { android.system.Os.setenv("AETHER_ENROLL_ADDRESS", enrollAddress, true) }
 
@@ -4089,20 +4095,28 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 ConnectionLog.record("Creating Android VPN interface")
                 val warpMtu = MtuConfig.forWarpProtocol(this@GuardVpnService, currentProtocol)
                 ConnectionLog.record("MTU: $warpMtu for $currentProtocol")
-                tun = Builder()
-                    .setSession("Asha Guard")
-                    .setMtu(warpMtu)
-                    // applyTunnelAddresses replaces the hardcoded /32 + /128
-                    // pair: v0.8.0 identities can carry a real prefix length,
-                    // and a WARP identity without a v6 address must not get a
-                    // v6 default route.
-                    .applyTunnelAddresses(addresses)
-                    .applyDns(effectiveConfig, addresses)
-                    .applyGatewayProxy(effectiveConfig, addresses)
-                    .applyLanAccess(addresses)
-                    .applySplitTunneling()
-                    // applySplitTunneling() handles app exclusion per mode.
-                    .establish() ?: error("Android could not establish the VPN interface")
+                tun = runCatching {
+                    Builder()
+                        .setSession("Asha Guard")
+                        .setMtu(warpMtu)
+                        // applyTunnelAddresses replaces the hardcoded /32 + /128
+                        // pair: v0.8.0 identities can carry a real prefix length,
+                        // and a WARP identity without a v6 address must not get a
+                        // v6 default route.
+                        .applyTunnelAddresses(addresses)
+                        .applyDns(effectiveConfig, addresses)
+                        .applyGatewayProxy(effectiveConfig, addresses)
+                        .applyLanAccess(addresses)
+                        .applySplitTunneling()
+                        // applySplitTunneling() handles app exclusion per mode.
+                        .establish()
+                }.getOrNull() ?: run {
+                    val needsPrep = VpnService.prepare(this@GuardVpnService) != null
+                    error(
+                        if (needsPrep) "VPN permission required or revoked by Android"
+                        else "Android could not establish the VPN interface"
+                    )
+                }
                 ConnectionLog.record("Scanning gateways for VPN")
                 sendStatus(STATUS_CONNECTING, "Scanning gateways…", 35)
                 // The Rust core is about to bind this TUN fd directly, which
@@ -5169,6 +5183,10 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             ranges.add(1, "172.16.0.0/12")
         }
         val tunCidr = tun?.let { "${it.subnet}/${it.prefixLength}" }
+        val v4Addr = addresses?.let { parseTunnelAddress(it.ipv4, 32)?.first }
+            ?: tun?.let { runCatching { InetAddress.getByName(it.ipAddress) }.getOrNull() }
+        val v6Addr = addresses?.let { parseTunnelAddress(it.ipv6, 128)?.first }
+
         var skipped = false
         ranges.forEach { cidr ->
             if (cidr == tunCidr) {
@@ -5176,10 +5194,26 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 return@forEach
             }
             val (address, prefix) = cidr.split('/')
-            excludeRoute(IpPrefix(InetAddress.getByName(address), prefix.toInt()))
+            val ipPrefix = runCatching { IpPrefix(InetAddress.getByName(address), prefix.toInt()) }.getOrNull()
+            if (ipPrefix == null) return@forEach
+            if (v4Addr != null && ipPrefix.contains(v4Addr)) {
+                ConnectionLog.record("LAN access: $cidr skipped (contains tunnel IPv4 $v4Addr)")
+                skipped = true
+                return@forEach
+            }
+            if (v6Addr != null && ipPrefix.contains(v6Addr)) {
+                ConnectionLog.record("LAN access: $cidr skipped (contains tunnel IPv6 $v6Addr)")
+                skipped = true
+                return@forEach
+            }
+            runCatching {
+                excludeRoute(ipPrefix)
+            }.onFailure { e ->
+                Log.w(LOG_TAG, "excludeRoute failed for $cidr: ${e.message}")
+            }
         }
         if (skipped) {
-            ConnectionLog.record("LAN access: $tunCidr kept on the tunnel (it is the TUN's own subnet)")
+            ConnectionLog.record("LAN access: kept routes overlapping tunnel address")
         }
         ConnectionLog.record("LAN routes bypass the VPN")
         return this

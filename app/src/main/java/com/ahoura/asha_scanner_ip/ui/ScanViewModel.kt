@@ -340,8 +340,11 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         transport: String = "wireguard"
     ) {
         viewModelScope.launch {
-            val endpoint = if (cleanIp.contains(":")) cleanIp else "$cleanIp:$port"
-            setManualEndpoint(endpoint)
+            if (com.ahoura.asha_scanner_ip.core.guard.CoreConfig.isWarpEndpoint(cleanIp)) {
+                val effectivePort = if (transport.lowercase() in listOf("masque", "mim")) 443 else 2408
+                val endpoint = if (cleanIp.contains(":")) cleanIp else "$cleanIp:$effectivePort"
+                setManualEndpoint(endpoint)
+            }
             setSelectedTransport(transport)
             startVpnTransport(context, transport)
         }

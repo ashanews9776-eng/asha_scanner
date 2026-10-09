@@ -115,15 +115,21 @@ class AshaVpnService : GuardVpnService() {
                         // Aether v2.3.0: Configure AETHER_ENROLL_ADDRESS for direct WARP API key acquisition & registration
                         val manualEndpoint = prefs.getString("manual_endpoint", null)?.trim().orEmpty()
                         val storedCleanIp = prefs.getString("clean_ip", null)?.trim().orEmpty()
-                        val rawCleanIp = cleanIp?.trim()?.takeIf { it.isNotBlank() }
-                            ?: manualEndpoint.takeIf { it.isNotBlank() }
-                            ?: storedCleanIp.takeIf { it.isNotBlank() }
+                        val rawCleanIp = manualEndpoint.takeIf { it.isNotBlank() }
+                            ?: cleanIp?.trim()?.takeIf { it.isNotBlank() && CoreConfig.isWarpEndpoint(it) }
+                            ?: storedCleanIp.takeIf { it.isNotBlank() && CoreConfig.isWarpEndpoint(it) }
 
-                        val masquePeer = CoreConfig.formatPeerForProtocol(rawCleanIp, "masque")
-                        val wgPeer = CoreConfig.formatPeerForProtocol(rawCleanIp, "wireguard")
+                        val masquePeer = if (rawCleanIp != null) CoreConfig.formatPeerForProtocol(rawCleanIp, "masque") else null
+                        val wgPeer = if (rawCleanIp != null) CoreConfig.formatPeerForProtocol(rawCleanIp, "wireguard") else null
                         val chosenEnrollIp = if (effectiveProto.lowercase() in listOf("masque", "mim")) masquePeer else wgPeer
 
-                        val enrollHost = rawCleanIp?.substringBefore(":")?.takeIf { it.isNotBlank() } ?: "162.159.192.1"
+                        val enrollHost = if (manualEndpoint.isNotBlank()) {
+                            manualEndpoint.substringBefore(":")
+                        } else if (rawCleanIp != null) {
+                            rawCleanIp.substringBefore(":")
+                        } else {
+                            "162.159.192.1"
+                        }
                         val enrollAddress = "$enrollHost:443"
                         runCatching { android.system.Os.setenv("AETHER_ENROLL_ADDRESS", enrollAddress, true) }
 

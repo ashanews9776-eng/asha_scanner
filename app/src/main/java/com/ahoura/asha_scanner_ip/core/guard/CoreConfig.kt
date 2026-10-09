@@ -112,6 +112,24 @@ object CoreConfig {
         }
     }
 
+    /**
+     * Checks whether an IP or endpoint belongs to known Cloudflare WARP/MASQUE Anycast ranges.
+     * Web CDN IPs (104.16.x.x, 172.67.x.x, etc.) are for website proxying and custom profiles,
+     * NOT native WARP/WireGuard or native MASQUE endpoints.
+     */
+    fun isWarpEndpoint(raw: String?): Boolean {
+        if (raw.isNullOrBlank()) return false
+        val host = raw.trim().substringBeforeLast(':').removeSurrounding("[", "]")
+        val warpPrefixes = listOf(
+            "162.159.192.", "162.159.193.", "162.159.195.", "162.159.197.",
+            "162.159.198.", "162.159.199.", "162.159.200.", "162.159.204.",
+            "188.114.96.", "188.114.97.", "188.114.98.", "188.114.99."
+        )
+        return warpPrefixes.any { host.startsWith(it) } ||
+            host.startsWith("162.159.") ||
+            host.startsWith("188.114.")
+    }
+
     fun json(context: Context, protocol: String? = null, cleanIpOverride: String? = null): String =
         json(context, protocol, listenOverride = null, socksProxyForCore = "", cleanIpOverride = cleanIpOverride)
 
@@ -199,11 +217,14 @@ object CoreConfig {
             put("masque_transport", text("default_masque_transport", "h3"))
             // A manual peer pins ONE address, and it belongs to whichever transport
             // the user entered it for. If no manual endpoint is entered, prefer
-            // any scanned/cached clean IP so the core dials directly without scanning.
+            // any scanned/cached clean IP ONLY if it is actually a known WARP/MASQUE endpoint,
+            // so the core dials directly without scanning. Web CDN IPs (104.16.x.x etc.)
+            // scanned for VLESS/Trojan must not be forced on native WARP/MASQUE transports.
             val manual = text("manual_endpoint").ifBlank { null }
             val clean = cleanIpOverride?.trim()?.takeIf { it.isNotBlank() }
                 ?: text("clean_ip").ifBlank { null }
-            val effectivePeer = formatPeerForProtocol(manual ?: clean, effectiveProtocol)
+            val candidatePeer = manual ?: clean?.takeIf { isWarpEndpoint(it) }
+            val effectivePeer = if (candidatePeer != null) formatPeerForProtocol(candidatePeer, effectiveProtocol) else null
             putOpt("forced_peer", effectivePeer)
             putOpt("forced_inner_peer", text("manual_inner_endpoint").ifBlank { null })
             put("obfuscation_profile", text("obfuscation_profile", "balanced"))
