@@ -13,6 +13,8 @@ import com.ahoura.asha_scanner_ip.core.validator.XrayProcessManager
 import com.ahoura.asha_scanner_ip.data.SettingsStore
 import com.ahoura.asha_scanner_ip.core.guard.CoreConfig
 import com.ahoura.asha_scanner_ip.core.guard.GuardVpnService
+import com.ahoura.asha_scanner_ip.core.guard.MtuConfig
+import com.ahoura.asha_scanner_ip.core.guard.TorManager
 import com.ahoura.asha_scanner_ip.core.guard.Tun2SocksManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +39,7 @@ class AshaVpnService : GuardVpnService() {
         const val EXTRA_CLEAN_IP = "extra_clean_ip"
         const val EXTRA_PROFILE_NAME = "extra_profile_name"
         const val EXTRA_TRANSPORT = "extra_transport"
+        const val EXTRA_CHAINED = "extra_chained"
     }
 
     private var customVpnInterface: ParcelFileDescriptor? = null
@@ -55,18 +58,33 @@ class AshaVpnService : GuardVpnService() {
                 ACTION_START -> {
                     // Immediately satisfy Android's foreground service start requirement
                     runCatching { startAsForeground() }
+                    System.setProperty("java.net.preferIPv4Stack", "true")
+                    System.setProperty("java.net.preferIPv6Addresses", "false")
 
                     val transport = intent.getStringExtra(EXTRA_TRANSPORT)?.trim()?.lowercase() ?: "custom"
                     val rawConfig = intent.getStringExtra(EXTRA_RAW_CONFIG) ?: ""
                     val cleanIp = intent.getStringExtra(EXTRA_CLEAN_IP)
                     val profileName = intent.getStringExtra(EXTRA_PROFILE_NAME) ?: "Proxy"
+                    val explicitChained = if (intent.hasExtra(EXTRA_CHAINED)) intent.getBooleanExtra(EXTRA_CHAINED, false) else null
 
                     if (transport != "custom" && rawConfig.isBlank()) {
                         // Asha Guard transport: wireguard, masque, gool, psiphon, tor, shard
                         stopCustomVpn()
                         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
                         prefs.edit().putString("default_protocol", transport).apply()
-                        val armed = prefs.getBoolean("chain_armed", true)
+
+                        if (!cleanIp.isNullOrBlank()) {
+                            prefs.edit().putString("clean_ip", cleanIp.trim()).apply()
+                        }
+
+                        val armed = if (explicitChained != null) {
+                            if (transport == "psiphon") prefs.edit().putBoolean("chain_armed", explicitChained).apply()
+                            if (transport == "tor") prefs.edit().putBoolean("tor_chain_armed", explicitChained).apply()
+                            explicitChained
+                        } else {
+                            if (transport == "tor") TorManager.chainArmed(this) else prefs.getBoolean("chain_armed", false)
+                        }
+
                         val effectiveProto = if (transport == "psiphon" && armed) {
                             GuardVpnService.CHAIN_PROTOCOL_MARKER.lowercase()
                         } else {
@@ -94,10 +112,106 @@ class AshaVpnService : GuardVpnService() {
                             runCatching { android.system.Os.unsetenv("AETHER_WIW_INNER_PEER") }
                         }
 
-                        CoreConfig.refreshPinnedIpsBlocking(this@AshaVpnService)
+                        // Aether v2.3.0: Configure AETHER_ENROLL_ADDRESS for direct WARP API key acquisition & registration
+                        val manualEndpoint = prefs.getString("manual_endpoint", null)?.trim().orEmpty()
+                        val storedCleanIp = prefs.getString("clean_ip", null)?.trim().orEmpty()
+                        val rawCleanIp = cleanIp?.trim()?.takeIf { it.isNotBlank() }
+                            ?: manualEndpoint.takeIf { it.isNotBlank() }
+                            ?: storedCleanIp.takeIf { it.isNotBlank() }
+
+                        val masquePeer = CoreConfig.formatPeerForProtocol(rawCleanIp, "masque")
+                        val wgPeer = CoreConfig.formatPeerForProtocol(rawCleanIp, "wireguard")
+                        val chosenEnrollIp = if (effectiveProto.lowercase() in listOf("masque", "mim")) masquePeer else wgPeer
+
+                        val enrollHost = rawCleanIp?.substringBefore(":")?.takeIf { it.isNotBlank() } ?: "162.159.192.1"
+                        val enrollAddress = "$enrollHost:443"
+                        runCatching { android.system.Os.setenv("AETHER_ENROLL_ADDRESS", enrollAddress, true) }
+
+                        val echEnabled = prefs.getBoolean("ech_enabled", false)
+                        if (echEnabled) {
+                            runCatching { android.system.Os.setenv("AETHER_ECH", "auto", true) }
+                        } else {
+                            runCatching { android.system.Os.unsetenv("AETHER_ECH") }
+                        }
+
+                        val isChained = (transport == "psiphon" && armed) ||
+                            (transport == "tor" && TorManager.chainArmed(this)) ||
+                            effectiveProto.contains("chain") ||
+                            effectiveProto.contains("psiphon-over-warp")
+                        val isOuterWarp = effectiveProto.lowercase() in listOf("masque", "mim", "gool", "warp-in-warp") || isChained
+
+                        if (isOuterWarp) {
+                            runCatching {
+                                val masqueTransport = prefs.getString("default_masque_transport", "h3")?.lowercase() ?: "h3"
+                                if (masqueTransport == "h2" || isChained) {
+                                    android.system.Os.setenv("AETHER_MASQUE_HTTP2", "1", true)
+                                } else {
+                                    android.system.Os.unsetenv("AETHER_MASQUE_HTTP2")
+                                }
+                                android.system.Os.setenv("AETHER_MASQUE_H2_FRAGMENT", "1", true)
+                                android.system.Os.setenv("AETHER_API_FRAGMENT", "1", true)
+                                android.system.Os.setenv("AETHER_MASQUE_STARTUP_SECS", "35", true)
+                                android.system.Os.setenv("AETHER_MASQUE_VALIDATE_SECS", "15", true)
+                                android.system.Os.setenv("AETHER_WG_VALIDATE_SECS", "15", true)
+                                if (masquePeer != null || wgPeer != null) {
+                                    if (masquePeer != null) {
+                                        android.system.Os.setenv("AETHER_MASQUE_H2_PEER", masquePeer, true)
+                                        android.system.Os.setenv("AETHER_PEER", masquePeer, true)
+                                    }
+                                    if (wgPeer != null) {
+                                        android.system.Os.setenv("AETHER_WG_PEER", wgPeer, true)
+                                    }
+                                } else {
+                                    android.system.Os.unsetenv("AETHER_PEER")
+                                    android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER")
+                                    android.system.Os.unsetenv("AETHER_WG_PEER")
+                                }
+                            }
+                        } else if (effectiveProto.lowercase() in listOf("wireguard", "wg")) {
+                            runCatching {
+                                android.system.Os.unsetenv("AETHER_MASQUE_HTTP2")
+                                android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER")
+                                if (wgPeer != null) {
+                                    android.system.Os.setenv("AETHER_PEER", wgPeer, true)
+                                    android.system.Os.setenv("AETHER_WG_PEER", wgPeer, true)
+                                } else {
+                                    android.system.Os.unsetenv("AETHER_PEER")
+                                    android.system.Os.unsetenv("AETHER_WG_PEER")
+                                }
+                            }
+                        } else {
+                            // Plain direct Psiphon, Tor, SHARD, custom proxy
+                            runCatching {
+                                android.system.Os.unsetenv("AETHER_MASQUE_HTTP2")
+                                android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER")
+                                android.system.Os.unsetenv("AETHER_WG_PEER")
+                                android.system.Os.unsetenv("AETHER_PEER")
+                            }
+                        }
+                        if (MtuConfig.isCustom(this, MtuConfig.Method.MASQUE)) {
+                            val mtu = MtuConfig.get(this, MtuConfig.Method.MASQUE).toString()
+                            runCatching { android.system.Os.setenv("AETHER_MASQUE_MTU", mtu, true) }
+                        }
+                        if (MtuConfig.isCustom(this, MtuConfig.Method.WIREGUARD)) {
+                            val mtu = MtuConfig.get(this, MtuConfig.Method.WIREGUARD).toString()
+                            runCatching { android.system.Os.setenv("AETHER_WG_MTU", mtu, true) }
+                        }
+                        if (MtuConfig.isCustom(this, MtuConfig.Method.WOW)) {
+                            val mtu = MtuConfig.get(this, MtuConfig.Method.WOW).toString()
+                            runCatching {
+                                android.system.Os.setenv("AETHER_WG_MTU", mtu, true)
+                                android.system.Os.setenv("AETHER_MASQUE_MTU", mtu, true)
+                            }
+                        }
+                        runCatching {
+                            // Let Go use Android APEX (/apex/com.android.conscrypt/cacerts) & system certs natively
+                            android.system.Os.unsetenv("SSL_CERT_DIR")
+                        }
+
+                        CoreConfig.refreshPinnedIpsBlocking(this@AshaVpnService, timeoutMs = 800L)
                         val tunnelIntent = Intent(this, AshaVpnService::class.java).apply {
                             action = ACTION_CONNECT
-                            val config = CoreConfig.json(this@AshaVpnService, effectiveProto)
+                            val config = CoreConfig.json(this@AshaVpnService, effectiveProto, cleanIpOverride = chosenEnrollIp)
                             putExtra(EXTRA_CONFIG, config)
                         }
                         return super.onStartCommand(tunnelIntent, flags, startId)
@@ -117,6 +231,18 @@ class AshaVpnService : GuardVpnService() {
                 }
                 ACTION_STOP -> {
                     stopCustomVpn()
+                    runCatching { android.system.Os.unsetenv("AETHER_ENROLL_ADDRESS") }
+                    runCatching { android.system.Os.unsetenv("AETHER_ECH") }
+                    runCatching { android.system.Os.unsetenv("AETHER_MASQUE_HTTP2") }
+                    runCatching { android.system.Os.unsetenv("AETHER_MASQUE_H2_FRAGMENT") }
+                    runCatching { android.system.Os.unsetenv("AETHER_API_FRAGMENT") }
+                    runCatching { android.system.Os.unsetenv("AETHER_SOCKS_PROXY") }
+                    runCatching { android.system.Os.unsetenv("AETHER_UPSTREAM") }
+                    runCatching { android.system.Os.unsetenv("AETHER_PEER") }
+                    runCatching { android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER") }
+                    runCatching { android.system.Os.unsetenv("AETHER_WG_PEER") }
+                    runCatching { android.system.Os.unsetenv("AETHER_MASQUE_MTU") }
+                    runCatching { android.system.Os.unsetenv("AETHER_WG_MTU") }
                     val stopTunnelIntent = Intent(this, AshaVpnService::class.java).apply {
                         action = ACTION_DISCONNECT
                     }
@@ -333,6 +459,7 @@ class AshaVpnService : GuardVpnService() {
     }
 
     private fun stopCustomVpn() {
+        val wasRunningCustom = isCustomActive
         isCustomActive = false
         customTimerJob?.cancel()
         customPingJob?.cancel()
@@ -345,6 +472,13 @@ class AshaVpnService : GuardVpnService() {
 
         runCatching { customVpnInterface?.close() }
         customVpnInterface = null
+
+        // Only a session this service was ACTUALLY running may report
+        // DISCONNECTED. On a guard-transport connect this runs BEFORE the new
+        // session starts — VpnManager.startTransport has just written
+        // CONNECTING, and broadcasting DISCONNECTED here announced a teardown
+        // of a tunnel that never existed, racing the new session's own status.
+        if (!wasRunningCustom) return
 
         VpnManager.updateStats {
             // Preserve a failure reason: the catch paths set ERROR before calling
@@ -361,6 +495,8 @@ class AshaVpnService : GuardVpnService() {
 
     override fun onDestroy() {
         stopCustomVpn()
+        runCatching { android.system.Os.unsetenv("AETHER_ENROLL_ADDRESS") }
+        runCatching { android.system.Os.unsetenv("AETHER_ECH") }
         super.onDestroy()
     }
 }

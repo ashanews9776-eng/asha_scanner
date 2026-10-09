@@ -58,16 +58,79 @@ object CoreConfig {
      */
     const val PLAIN_WORKING_TRANSPORT_PREF = "plain_working_transport"
 
+    const val MIM_ARMED_PREF = "mim_armed"
+    const val MIM_ARMED_DEFAULT = false
+    const val MIM_PROTOCOL = "mim"
 
-    fun json(context: Context, protocol: String? = null): String =
-        json(context, protocol, listenOverride = null)
+    fun mimArmed(context: Context): Boolean =
+        context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .getBoolean(MIM_ARMED_PREF, MIM_ARMED_DEFAULT)
+
+    fun vpnMtu(context: Context, default: Int = 1280): Int {
+        return context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .getInt("vpn_mtu", default)
+    }
+
+    fun setVpnMtu(context: Context, mtu: Int) {
+        val clamped = mtu.coerceIn(1280, 1500)
+        context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .edit()
+            .putInt("vpn_mtu", clamped)
+            .putInt(MtuConfig.KEY_MASQUE, clamped)
+            .putInt(MtuConfig.KEY_WIREGUARD, clamped)
+            .putInt(MtuConfig.KEY_WOW, clamped)
+            .apply()
+    }
+
+
+    /**
+     * Formats an endpoint or clean IP to ensure the port matches protocol expectations.
+     * MASQUE / MIM run over HTTPS/QUIC (port 443). WireGuard / WoW run over port 2408.
+     * Port 2408 is NEVER valid for MASQUE (Cloudflare does not listen for TLS/QUIC on 2408).
+     */
+    fun formatPeerForProtocol(rawPeer: String?, protocol: String): String? {
+        if (rawPeer.isNullOrBlank()) return null
+        val clean = rawPeer.trim()
+        if (clean.isEmpty()) return null
+
+        val isMasque = protocol.lowercase() in listOf("masque", "mim", "chain", "psiphon-over-warp", "tor-over-warp")
+        val defaultPort = if (isMasque) 443 else 2408
+
+        return if (clean.contains(":")) {
+            val host = clean.substringBeforeLast(":")
+            val portStr = clean.substringAfterLast(":")
+            val port = portStr.toIntOrNull()
+            if (isMasque && port == 2408) {
+                "$host:443"
+            } else if (!isMasque && port == 443) {
+                "$host:2408"
+            } else {
+                clean
+            }
+        } else {
+            "$clean:$defaultPort"
+        }
+    }
+
+    fun json(context: Context, protocol: String? = null, cleanIpOverride: String? = null): String =
+        json(context, protocol, listenOverride = null, socksProxyForCore = "", cleanIpOverride = cleanIpOverride)
 
     /**
      * @param listenOverride binds the core's SOCKS listener somewhere other than
      *   [SOCKS_PORT]. Only the outer leg of Psiphon-over-WARP uses this: Psiphon
      *   owns [SOCKS_PORT] in that mode, so the core has to move aside.
+     * @param socksProxyForCore route the account API through a SOCKS5 listener,
+     *   so a fresh install can register an identity on a carrier that blocked
+     *   api.cloudflareclient.com. See [IdentityProvisioner].
+     * @param cleanIpOverride optional tested clean Cloudflare IP to pin as forced_peer.
      */
-    fun json(context: Context, protocol: String?, listenOverride: Int?): String {
+    fun json(
+        context: Context,
+        protocol: String?,
+        listenOverride: Int?,
+        socksProxyForCore: String = "",
+        cleanIpOverride: String? = null,
+    ): String {
         val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
         fun text(key: String, fallback: String = "") =
             prefs.getString(key, fallback)?.trim().orEmpty()
@@ -81,12 +144,24 @@ object CoreConfig {
 
         return JSONObject().apply {
             put("config_path", File(context.filesDir, "aether.toml").absolutePath)
+            // Identity provisioning through SHARD: when the carrier has blocked
+            // the account API, this points the core's registration at a SOCKS
+            // listener that is already on the open internet, so a fresh install
+            // can obtain an identity it could not get from its own link.
+            // Set by GuardVpnService for one connect only (see
+            // IdentityProvisioner); absent on a normal connect.
+            takeIf { socksProxyForCore.isNotBlank() }?.put("socks_proxy", socksProxyForCore)
             // Fallback must match MainActivity's `savedProtocol()` and the tile's
             // default. This is the value used before the user has ever picked
             // anything, i.e. on a first connect — and WireGuard now leads the rail,
             // so a disagreement here would build a MASQUE config under a UI showing
             // WireGuard selected.
-            put("protocol", protocol ?: text("default_protocol", "wireguard"))
+            val effectiveProtocol = if ((protocol ?: text("default_protocol", "wireguard")) == "masque" && mimArmed(context)) {
+                MIM_PROTOCOL
+            } else {
+                protocol ?: text("default_protocol", "wireguard")
+            }
+            put("protocol", effectiveProtocol)
             // Where the core's own SOCKS listener goes.
             //
             // Three cases, and the first two are why this is not a constant any more:
@@ -123,12 +198,14 @@ object CoreConfig {
             put("endpoint_discovery", text("endpoint_discovery", "cache"))
             put("masque_transport", text("default_masque_transport", "h3"))
             // A manual peer pins ONE address, and it belongs to whichever transport
-            // the user entered it for. Handing it to the chain's ladder would send a
-            // MASQUE gateway to the WireGuard rung, where it cannot work — so the
-            // chain's outer legs always scan.
-            if (listenOverride == null) {
-                putOpt("forced_peer", text("manual_endpoint").ifBlank { null })
-            }
+            // the user entered it for. If no manual endpoint is entered, prefer
+            // any scanned/cached clean IP so the core dials directly without scanning.
+            val manual = text("manual_endpoint").ifBlank { null }
+            val clean = cleanIpOverride?.trim()?.takeIf { it.isNotBlank() }
+                ?: text("clean_ip").ifBlank { null }
+            val effectivePeer = formatPeerForProtocol(manual ?: clean, effectiveProtocol)
+            putOpt("forced_peer", effectivePeer)
+            putOpt("forced_inner_peer", text("manual_inner_endpoint").ifBlank { null })
             put("obfuscation_profile", text("obfuscation_profile", "balanced"))
             putOpt("obfuscation_parameters", manualObfuscation.takeIf { it.length() > 0 }?.toString())
             put("retry_obfuscation_profiles", prefs.getBoolean("retry_obfuscation_profiles", true))
@@ -137,6 +214,7 @@ object CoreConfig {
             put("log_level", text("log_level", "info"))
             put("perf_profile", text("perf_profile", "auto"))
             put("h2_fragmentation", text("h2_fragmentation", "on") == "on")
+            put("mixed_case_sni", prefs.getBoolean("mixed_case_sni", false))
             val customUdp = prefs.getString("dns_servers_udp", null)?.ifBlank { null }
             putOpt("dns_servers", customUdp ?: text("dns_servers").ifBlank { null })
             putOpt("route_block", text("route_block").ifBlank { null })
@@ -167,8 +245,18 @@ object CoreConfig {
      *   [CHAIN_OUTER_LADDER] and calls this once per rung, so the choice belongs to
      *   the caller rather than to a stored preference.
      */
-    fun chainOuterJson(context: Context, protocol: String): String =
-        json(context, protocol, listenOverride = CHAIN_SOCKS_PORT)
+    fun chainOuterJson(context: Context, protocol: String, cleanIpOverride: String? = null): String {
+        val jsonStr = json(context, protocol, listenOverride = CHAIN_SOCKS_PORT, cleanIpOverride = cleanIpOverride)
+        return if (protocol.lowercase() in listOf("masque", "mim")) {
+            runCatching {
+                val obj = JSONObject(jsonStr)
+                obj.put("masque_transport", "h2")
+                obj.toString()
+            }.getOrDefault(jsonStr)
+        } else {
+            jsonStr
+        }
+    }
 
     /**
      * The outer transports tried, in order, until one carries Psiphon.
@@ -276,7 +364,7 @@ object CoreConfig {
     const val HTTP_PROXY_PORT = 8080
 
     const val DNS_PINNED_IPS_PREF = "dns_pinned_ips"
-    private const val PIN_REFRESH_TIMEOUT_MS = 1500L
+    private const val PIN_REFRESH_TIMEOUT_MS = 800L
     private const val TAG_DNS = "DnsPin"
 
     /**

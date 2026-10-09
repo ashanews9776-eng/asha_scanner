@@ -67,7 +67,7 @@ object TorManager {
      * rung that carries them is remembered per device so the search is paid once.
      */
     const val CHAIN_ARMED_PREF = "tor_chain_armed"
-    const val CHAIN_ARMED_DEFAULT = true
+    const val CHAIN_ARMED_DEFAULT = false
 
     /**
      * Which rung of the AUTO ladder last carried a working circuit.
@@ -129,7 +129,7 @@ object TorManager {
      * take that long — a 45s window would have killed the field log's Meek rung
      * *earlier* than the old fixed budget did.
      */
-    private const val STALL_TIMEOUT_S = 90L
+    private const val STALL_TIMEOUT_S = 60L
 
     /**
      * Absolute ceiling per rung, however well it is progressing.
@@ -141,8 +141,8 @@ object TorManager {
      * Worst case for the whole AUTO ladder is now bounded by the stall detector,
      * not by these: four blocked transports cost 4 × 90s, not 4 × ceiling.
      */
-    private const val DIRECT_TIMEOUT_S = 150L
-    private const val BRIDGE_TIMEOUT_S = 300L
+    private const val DIRECT_TIMEOUT_S = 60L
+    private const val BRIDGE_TIMEOUT_S = 180L
 
     /** Poll interval while waiting for bootstrap. */
     private const val BOOTSTRAP_POLL_MS = 250L
@@ -906,7 +906,8 @@ object TorManager {
             if (stopping.get()) break
             if (!process.isAlive) break
             val now = System.currentTimeMillis()
-            if (now - lastProgressMs.get() > STALL_TIMEOUT_S * 1_000) {
+            val isDirectEarlyStall = mode == TorMode.DIRECT && bootstrapPercent <= 5 && (now - startedMs > 12_000)
+            if (now - lastProgressMs.get() > STALL_TIMEOUT_S * 1_000 || isDirectEarlyStall) {
                 stalled = true
                 break
             }

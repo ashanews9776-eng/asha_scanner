@@ -37,7 +37,7 @@ import com.ahoura.asha_scanner_ip.ui.screens.ResultsScreen
 import com.ahoura.asha_scanner_ip.ui.screens.ScanLiveScreen
 import com.ahoura.asha_scanner_ip.ui.screens.TestIpsScreen
 
-enum class Route { HOME, QUICK, CUSTOM, TEST, DISCOVER, LIVE, RESULTS, VPN, DNS, ABOUT }
+enum class Route { HOME, QUICK, CUSTOM, TEST, DISCOVER, LIVE, RESULTS, VPN, DNS, ABOUT, SPLIT_TUNNEL, SPEEDTEST }
 
 const val TELEGRAM_HANDLE = "@asha_news2"
 const val TELEGRAM_URL = "https://t.me/asha_news2"
@@ -59,7 +59,7 @@ fun AshaApp(vm: ScanViewModel) {
 
     // Keep the living backdrop in motion only where it earns its keep — the Home
     // first-impression, the active scan, and the VPN screen.
-    val animatedBg = current == Route.HOME || current == Route.LIVE || current == Route.VPN
+    val animatedBg = current == Route.HOME || current == Route.LIVE || current == Route.VPN || current == Route.SPEEDTEST
 
     CompositionLocalProvider(
         LocalLayoutDirection provides direction,
@@ -87,6 +87,7 @@ fun AshaApp(vm: ScanViewModel) {
                                     onDiscover = { vm.prepareDiscover(); push(Route.DISCOVER) },
                                     onVpn = { push(Route.VPN) },
                                     onDns = { push(Route.DNS) },
+                                    onSpeedTest = { push(Route.SPEEDTEST) },
                                     onAbout = { push(Route.ABOUT) },
                                     onToggleLang = { vm.toggleLanguage() },
                                 )
@@ -124,11 +125,19 @@ fun AshaApp(vm: ScanViewModel) {
                                 Route.VPN -> com.ahoura.asha_scanner_ip.ui.screens.VpnScreen(
                                     vm = vm,
                                     onBack = ::back,
+                                    onSplitTunnel = { push(Route.SPLIT_TUNNEL) },
+                                    onSpeedTest = { push(Route.SPEEDTEST) },
                                 )
                                 Route.DNS -> com.ahoura.asha_scanner_ip.ui.screens.DnsScreen(
                                     vm = vm,
                                     onBack = ::back,
                                     onOpenVpn = { push(Route.VPN) },
+                                )
+                                Route.SPLIT_TUNNEL -> com.ahoura.asha_scanner_ip.ui.screens.SplitTunnelScreen(
+                                    onBack = ::back,
+                                )
+                                Route.SPEEDTEST -> com.ahoura.asha_scanner_ip.ui.screens.SpeedTestScreen(
+                                    onBack = ::back,
                                 )
                                 Route.ABOUT -> AboutScreen(onBack = ::back)
                             }

@@ -1191,6 +1191,8 @@ object ShardSocksFront {
                 // only ever send small UDP keep working untouched.
                 if (payload.size > UDP_MAX_PAYLOAD) {
                     reportOversizedUdp(payload.size, sendTo.hostAddress, sendToPort)
+                    runCatching { association.close() }
+                    associations.remove(conid)
                     continue
                 }
                 try {

@@ -275,7 +275,7 @@ class GuardTileService : TileService() {
          * connected", so if the two defaults disagree, a tile-initiated connect on a
          * fresh install raises a different tunnel shape than the button does.
          */
-        const val CHAIN_ARMED_DEFAULT = true
+        const val CHAIN_ARMED_DEFAULT = false
 
 
         enum class Protocol(

@@ -1,6 +1,16 @@
 package com.ahoura.asha_scanner_ip.core.guard
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+data class AppEntry(
+    val packageName: String,
+    val label: String,
+    val isSystem: Boolean,
+)
 
 class SplitTunnelSettings(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
@@ -21,7 +31,7 @@ class SplitTunnelSettings(context: Context) {
         preferences.edit()
             .putString(MODE, mode.name)
             .putStringSet(PACKAGES, packages.toHashSet())
-            .commit()
+            .apply()
     }
 
     fun cleanup(installedPackages: Set<String>) {
@@ -32,9 +42,31 @@ class SplitTunnelSettings(context: Context) {
         }
     }
 
-    private companion object {
-        const val PREFERENCES = "split_tunneling"
-        const val MODE = "mode"
-        const val PACKAGES = "packages"
+    companion object {
+        private const val PREFERENCES = "split_tunneling"
+        private const val MODE = "mode"
+        private const val PACKAGES = "packages"
+
+        suspend fun loadInstalledApps(context: Context): List<AppEntry> = withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            val ourPkg = context.packageName
+            val installed = runCatching {
+                pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            }.getOrDefault(emptyList())
+
+            installed
+                .filter { it.packageName != ourPkg }
+                .map { appInfo ->
+                    val isSys = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                    val label = runCatching { pm.getApplicationLabel(appInfo).toString() }
+                        .getOrDefault(appInfo.packageName)
+                    AppEntry(
+                        packageName = appInfo.packageName,
+                        label = label,
+                        isSystem = isSys,
+                    )
+                }
+                .sortedWith(compareBy({ it.isSystem }, { it.label.lowercase() }))
+        }
     }
 }

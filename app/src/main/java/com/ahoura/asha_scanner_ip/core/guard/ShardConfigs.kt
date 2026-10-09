@@ -73,6 +73,34 @@ data class ShardNode(
     val finalMask: String,
     /** `alpn`, comma-separated. Empty when absent. */
     val alpn: String,
+    /** `ech`, e.g. "cloudflare-ech.com+udp://1.1.1.1". Empty when absent. Verbatim from subscription. */
+    val echConfigList: String,
+    /** `echOutbound`, raw JSON outbound for ECH query. Empty when absent. Verbatim. */
+    val echOutbound: String,
+    /** `insecure`/`allowInsecure` — true means skip cert verify. False by default (same as upstream). */
+    val allowInsecure: Boolean,
+    /** `vcn` verifyPeerCertByName. Empty when absent. Verbatim. */
+    val verifyPeerCertByName: String,
+    /** `pcs` pinnedPeerCertSha256. Empty when absent. Verbatim. */
+    val pinnedPeerCertSha256: String,
+    /** `flow` for VLESS (xtls-rprx-vision etc). Empty when absent. Verbatim. */
+    val flow: String,
+    /** `pbk` REALITY public key. Empty when absent. Verbatim. */
+    val realityPublicKey: String,
+    /** `sid` REALITY shortId. Empty when absent. Verbatim. */
+    val realityShortId: String,
+    /** `spx` REALITY spiderX. Empty when absent. Verbatim. */
+    val realitySpiderX: String,
+    /** `pqv` REALITY mldsa65Verify. Empty when absent. Verbatim. */
+    val realityMldsa65Verify: String,
+    /**
+     * `extra`, a raw JSON object. Empty when absent.
+     *
+     * Only xhttp nodes carry it, and only for `xmux` so far: the publisher's
+     * xhttp nodes ship `extra={"xmux":{"maxConnections":1,"maxReuseTimes":0}}`,
+     * which is how many HTTP requests share one connection on that transport.
+     */
+    val extra: String = "",
     /** The `#fragment` label, decoded. Diagnostic only — never shown as-is. */
     val label: String,
 ) {
@@ -84,7 +112,7 @@ data class ShardNode(
      * away every node's measured latency once a day for no reason.
      */
     val key: String
-        get() = "$protocol|$credential|$address|$port|$network|$security|$path|$host"
+        get() = "$protocol|$credential|$address|$port|$network|$security|$path|$host|$echConfigList|$echOutbound|$flow"
 
     /** What the UI may show. Never the raw label, which carries other people's channel ads. */
     val displayName: String
@@ -156,7 +184,7 @@ object ShardConfigs {
     private const val CUSTOM_CF_IP_PREF = "shard_custom_cf_ip"
 
     /** Schemes we can actually run. Anything else in the file is skipped. */
-    private val SUPPORTED = setOf("vless", "trojan")
+    private val SUPPORTED = setOf("vless", "trojan", "anytls")
 
     /**
      * Get the user's custom Cloudflare IP, if set.
@@ -165,6 +193,11 @@ object ShardConfigs {
     private fun getCustomCfIp(context: Context): String =
         context.getSharedPreferences("settings", Context.MODE_PRIVATE)
             .getString(CUSTOM_CF_IP_PREF, "")?.trim().orEmpty()
+
+    /**
+     * Whether the user has pinned every outbound to one custom Cloudflare IP.
+     */
+    fun hasCustomIp(context: Context): Boolean = getCustomCfIp(context).isNotEmpty()
 
     /**
      * Clear the user's custom Cloudflare IP.
@@ -223,6 +256,7 @@ object ShardConfigs {
         val hostPort = hostPortAndQuery.substringBefore('?')
         val query = hostPortAndQuery.substringAfter('?', "")
         val address = hostPort.substringBeforeLast(':', "")
+        if (address.contains("[") || address.contains("]")) return null
         val port = hostPort.substringAfterLast(':', "").toIntOrNull() ?: return null
         if (address.isEmpty() || port !in 1..65535) return null
 
@@ -230,11 +264,16 @@ object ShardConfigs {
         val host = params["host"].orEmpty()
         val sni = params["sni"].orEmpty()
         val security = params["security"]?.lowercase(Locale.US).orEmpty().ifEmpty { "none" }
-        // Only ws is implemented. A node announcing anything else is dropped
-        // rather than run as ws, which would fail at the HTTP upgrade with a
-        // useless error.
+        // Only ws and xhttp are implemented for xray.
         val network = params["type"]?.lowercase(Locale.US).orEmpty().ifEmpty { "tcp" }
-        if (network != "ws") return null
+        if (scheme != "anytls" && network != "ws" && network != "xhttp") return null
+
+        // Exhaustive parity: every query param is read verbatim.
+        // No normalization, no defaults — the publisher's own tuning is the source of truth.
+        // insecure: 3 keys (insecure/allowInsecure/allow_insecure), pcs-gated like upstream TLS builder
+        val rawInsecure = params["insecure"] == "1" || params["allowinsecure"] == "1" || params["allow_insecure"] == "1"
+        val pcs = params["pcs"].orEmpty()
+        val allowInsecure = rawInsecure && pcs.isEmpty()
 
         ShardNode(
             protocol = scheme,
@@ -253,6 +292,17 @@ object ShardConfigs {
             cipherSuites = params["cs"].orEmpty(),
             finalMask = params["fm"].orEmpty(),
             alpn = params["alpn"].orEmpty(),
+            echConfigList = params["ech"].orEmpty(),
+            echOutbound = params["echoutbound"].orEmpty(),
+            allowInsecure = allowInsecure,
+            verifyPeerCertByName = params["vcn"].orEmpty(),
+            pinnedPeerCertSha256 = pcs,
+            flow = params["flow"].orEmpty(),
+            realityPublicKey = params["pbk"].orEmpty(),
+            realityShortId = params["sid"].orEmpty(),
+            realitySpiderX = params["spx"].orEmpty(),
+            realityMldsa65Verify = params["pqv"].orEmpty(),
+            extra = params["extra"].orEmpty(),
             label = label,
         )
     } catch (_: Exception) {
@@ -315,6 +365,7 @@ object ShardConfigs {
                                     // "none" is the only VLESS encryption there is;
                                     // the field is still required by the parser.
                                     put("encryption", "none")
+                                    if (node.flow.isNotEmpty()) put("flow", node.flow)
                                 }
                             )
                         )
@@ -352,30 +403,55 @@ object ShardConfigs {
                         put("serverName", node.serverName)
                         if (node.fingerprint.isNotEmpty()) put("fingerprint", node.fingerprint)
                         if (node.cipherSuites.isNotEmpty()) put("cipherSuites", node.cipherSuites)
-                        if (node.alpn.isNotEmpty()) {
+                        if (node.network == "xhttp" && node.alpn.isEmpty()) {
+                            put("alpn", JSONArray().put("h2"))
+                        } else if (node.alpn.isNotEmpty()) {
                             put("alpn", JSONArray().apply { node.alpn.split(',').forEach { put(it.trim()) } })
                         }
-                        // allowInsecure stays FALSE. These are other people's CDN
-                        // hosts and the certificate is the only evidence we are
-                        // talking to the host we asked for; turning verification
-                        // off to raise the success rate would make every node
-                        // MITM-able by the carrier, which is the exact threat this
-                        // transport exists to defeat.
-                        put("allowInsecure", false)
+                        if (node.echConfigList.isNotEmpty()) put("echConfigList", node.echConfigList)
+                        put("allowInsecure", node.allowInsecure)
+                        if (node.verifyPeerCertByName.isNotEmpty()) put("verifyPeerCertByName", node.verifyPeerCertByName)
+                        if (node.pinnedPeerCertSha256.isNotEmpty()) put("pinnedPeerCertSha256", node.pinnedPeerCertSha256)
+                    }
+                )
+            } else if (node.security == "reality") {
+                put(
+                    "realitySettings",
+                    JSONObject().apply {
+                        put("serverName", node.serverName)
+                        if (node.fingerprint.isNotEmpty()) put("fingerprint", node.fingerprint)
+                        if (node.realityPublicKey.isNotEmpty()) put("publicKey", node.realityPublicKey)
+                        if (node.realityShortId.isNotEmpty()) put("shortId", node.realityShortId)
+                        if (node.realitySpiderX.isNotEmpty()) put("spiderX", node.realitySpiderX)
+                        if (node.realityMldsa65Verify.isNotEmpty()) put("mldsa65Verify", node.realityMldsa65Verify)
                     }
                 )
             }
-            put(
-                "wsSettings",
-                JSONObject().apply {
-                    put("path", node.path)
-                    // Independent "host", not headers.Host. The fork's
-                    // WebSocketConfig.Build() accepts the header form but calls
-                    // PrintDeprecatedFeatureWarning for it, which would put a
-                    // warning line in the user's log on every single connect.
-                    put("host", node.host)
-                }
-            )
+            if (node.network == "xhttp") {
+                put(
+                    "xhttpSettings",
+                    JSONObject().apply {
+                        put("path", node.path)
+                        put("host", node.host)
+                        put("mode", "auto")
+                        if (node.extra.isNotEmpty()) {
+                            runCatching { put("extra", JSONObject(node.extra)) }
+                        }
+                    }
+                )
+            } else {
+                put(
+                    "wsSettings",
+                    JSONObject().apply {
+                        put("path", node.path)
+                        // Independent "host", not headers.Host. The fork's
+                        // WebSocketConfig.Build() accepts the header form but calls
+                        // PrintDeprecatedFeatureWarning for it, which would put a
+                        // warning line in the user's log on every single connect.
+                        put("host", node.host)
+                    }
+                )
+            }
         }
 
         return JSONObject().apply {
@@ -573,7 +649,8 @@ object ShardConfigs {
         smartSplit: SmartSplit.FragmentProfile? = null,
     ): String {
         val outbounds = JSONArray()
-            .put(outbound(context, node, "proxy"))
+            .put(outbound(context, node, "proxy", mux = false))
+            .put(dohOutbound())
             .put(
                 JSONObject().apply {
                     put("tag", "blackhole")
@@ -707,13 +784,39 @@ object ShardConfigs {
                 )
             }
             put("inbounds", inbounds)
-            // Without Smart Split: no routing rules at all: with "proxy" first it is
-            // the default outbound and everything goes through the node. blackhole is
-            // present only so a future rule has something to point at.
             put("outbounds", outbounds)
             if (smartSplit != null) {
                 put("dns", smartSplitDns(context))
                 put("routing", JSONObject().put("rules", smartSplitRules(context)))
+            } else {
+                put("dns", JSONObject().apply {
+                    put("queryStrategy", "UseIP")
+                    put("useSystemHosts", true)
+                    put("serveStale", true)
+                    put(
+                        "servers",
+                        JSONArray().put(
+                            JSONObject().apply {
+                                put("tag", DOH_OUTBOUND_TAG)
+                                put("address", "https://1.1.1.1/dns-query")
+                                put("timeoutMs", 12000)
+                            }
+                        )
+                    )
+                })
+                put(
+                    "routing",
+                    JSONObject().put(
+                        "rules",
+                        JSONArray().put(
+                            JSONObject().apply {
+                                put("type", "field")
+                                put("port", 53)
+                                put("outboundTag", DOH_OUTBOUND_TAG)
+                            }
+                        )
+                    )
+                )
             }
         }.toString()
     }
@@ -1333,6 +1436,23 @@ object ShardConfigs {
                 put("network", "udp")
                 put("outboundTag", "direct-plain")
             })
+    }
+
+    private const val DOH_OUTBOUND_TAG = "doh-resolver"
+
+    private fun dohOutbound(): JSONObject = JSONObject().apply {
+        put("tag", DOH_OUTBOUND_TAG)
+        put("protocol", "dns")
+        put(
+            "settings",
+            JSONObject().apply {
+                put("address", "https://1.1.1.1/dns-query")
+                put("port", 443)
+                put("nonIPQuery", "drop")
+                put("userLevel", 1)
+            }
+        )
+        put("proxySettings", JSONObject().put("tag", "proxy"))
     }
 
     /** Write [config] to the process's private dir and return the file. */

@@ -152,11 +152,17 @@ object VpnManager {
     /**
      * Starts an Asha Guard transport (wireguard, masque, gool, psiphon, tor, shard).
      */
-    fun startTransport(context: Context, transport: String) {
+    fun startTransport(context: Context, transport: String, cleanIp: String? = null, chained: Boolean? = null) {
         init(context)
         val intent = Intent(context, AshaVpnService::class.java).apply {
             action = AshaVpnService.ACTION_START
             putExtra(AshaVpnService.EXTRA_TRANSPORT, transport)
+            if (!cleanIp.isNullOrBlank()) {
+                putExtra(AshaVpnService.EXTRA_CLEAN_IP, cleanIp)
+            }
+            if (chained != null) {
+                putExtra(AshaVpnService.EXTRA_CHAINED, chained)
+            }
         }
         _stats.update {
             it.copy(

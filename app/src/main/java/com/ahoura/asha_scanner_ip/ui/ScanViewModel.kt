@@ -102,7 +102,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         getPrefString("psiphon_egress_region", "auto")
     )
     val psiphonChained = MutableStateFlow(
-        getPrefBool("chain_armed", true)
+        getPrefBool("chain_armed", false)
     )
     val torMode = MutableStateFlow(
         getPrefString("tor_mode", "auto")
@@ -111,7 +111,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         getPrefString("tor_exit_region", "auto")
     )
     val torChained = MutableStateFlow(
-        getPrefBool("tor_chain_armed", true)
+        getPrefBool("tor_chain_armed", false)
     )
     val chainOuterMode = MutableStateFlow(
         getPrefString("chain_outer_mode", "auto")
@@ -1071,6 +1071,12 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                     val url = if (subServer.isListening) subServer.getUrl() else null
                     _state.update { it.copy(progress = p, subUrl = url) }
                     subServer.updateResults(p.best, proxy)
+                    if (p.best.isNotEmpty()) {
+                        val topIp = p.best.first().ip
+                        getApplication<android.app.Application>()
+                            .getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+                            .edit().putString("clean_ip", topIp).apply()
+                    }
                 }
             } catch (_: Throwable) {
                 // cancellation or unexpected error — handled by stop()/final state
@@ -1146,7 +1152,19 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     fun startVpnTransport(context: android.content.Context, transport: String) {
         setSelectedTransport(transport)
-        com.ahoura.asha_scanner_ip.core.vpn.VpnManager.startTransport(context, transport)
+        val cleanIp = _state.value.progress.best.firstOrNull()?.ip
+            ?: context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).getString("clean_ip", null)?.trim()
+        val isChained = when (transport.lowercase()) {
+            "psiphon" -> psiphonChained.value
+            "tor" -> torChained.value
+            else -> false
+        }
+        com.ahoura.asha_scanner_ip.core.vpn.VpnManager.startTransport(
+            context,
+            transport,
+            cleanIp = cleanIp,
+            chained = isChained,
+        )
     }
 
     fun startVpn(context: android.content.Context, profile: com.ahoura.asha_scanner_ip.core.vpn.VpnProfile) {

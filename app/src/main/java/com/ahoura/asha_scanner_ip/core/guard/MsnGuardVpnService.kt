@@ -1,5 +1,6 @@
 package com.ahoura.asha_scanner_ip.core.guard
 
+import java.io.File
 import android.app.Notification
 import com.msnguard.vpn.NativeCore
 import android.app.NotificationChannel
@@ -136,6 +137,10 @@ private val PSIPHON_ALTERNATE_DNS = listOf(
     "208.67.222.222:5353",
     "9.9.9.9:9953",
     "208.67.220.220:5353",
+    "1.1.1.1:53",
+    "8.8.8.8:53",
+    "77.88.8.8:1253",
+    "1.0.0.1:53",
 )
 
 /**
@@ -165,7 +170,17 @@ private class PsiphonStrategy(
 )
 
 open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunnel.HostService {
-    private val worker: ExecutorService = Executors.newSingleThreadExecutor()
+    @Volatile
+    private var _worker: ExecutorService? = null
+    private val worker: ExecutorService
+        @Synchronized get() {
+            val current = _worker
+            return if (current == null || current.isShutdown || current.isTerminated) {
+                Executors.newSingleThreadExecutor().also { _worker = it }
+            } else {
+                current
+            }
+        }
     private val connected = AtomicBoolean(false)
     private val stopRequested = AtomicBoolean(false)
     private val vpnModeActive = AtomicBoolean(false)
@@ -371,6 +386,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
     private var psiphonTunnel: PsiphonTunnel? = null
     private var psiphonConfigJson: String = ""
     private var psiphonVpnMode = false
+    private var psiphonUdpFilteredLogged = false
 
     /**
      * Whether THIS session is proxy-only, latched at [startTunnel].
@@ -428,6 +444,9 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
     @Volatile
     private var chainOuterCommitted = false
 
+    @Volatile
+    private var provisionedShardOurselves = false
+
     // Evidence about how the tunnel was actually established, gathered from
     // Psiphon's own notices rather than inferred from which rung was active.
     private var activeTunnelProtocol = ""
@@ -439,7 +458,17 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
     // for two minutes and giving up, we walk the ladder automatically: each rung
     // gets its own budget, and a timeout promotes us to the next rung without
     // any user interaction.
-    private val ladderScheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+    @Volatile
+    private var _ladderScheduler: ScheduledExecutorService? = null
+    private val ladderScheduler: ScheduledExecutorService
+        @Synchronized get() {
+            val current = _ladderScheduler
+            return if (current == null || current.isShutdown || current.isTerminated) {
+                Executors.newSingleThreadScheduledExecutor().also { _ladderScheduler = it }
+            } else {
+                current
+            }
+        }
 
     /**
      * Polls [TorSocksFront]'s byte counters while a Tor session is up.
@@ -510,94 +539,64 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      * after one successful connect each SIM starts on its own best rung and the
      * ordering here only matters for the very first attempt.
      */
+    private val psiphonLadderChained: List<PsiphonStrategy> = listOf(
+        PsiphonStrategy(
+            name = "WARP-CHAIN",
+            label = "tunneled over WARP (all TCP)",
+            timeoutSeconds = 25,
+            preferredProtocols = PROTOCOLS_CHAINABLE,
+        ) { config ->
+            config.put("LimitTunnelProtocols", JSONArray(PROTOCOLS_CHAINABLE))
+            config.put("ConnectionWorkerPoolSize", 16)
+            config.put("InproxyEnabled", false)
+            config.put("InproxyAllowClient", false)
+        }
+    )
+
     private val psiphonLadder: List<PsiphonStrategy> = listOf(
         PsiphonStrategy(
             name = "A",
-            label = "domain-fronted (CDN)",
-            timeoutSeconds = 60,
+            label = "domain-fronted & edge",
+            timeoutSeconds = 15,
             preferredProtocols = PROTOCOLS_FRONTED,
         ) { config ->
-            // Fronted protocols terminate on an Amazon/Cloudflare edge address,
-            // never on a Psiphon-owned IP, so a carrier IP blocklist cannot see
-            // or drop them. They do need working DNS to resolve the front, which
-            // is what the public resolvers on the TUN provide.
-            //
-            // Only 5 of the 430 bundled server entries advertise FRONTED-MEEK
-            // (4x US, 1x GB) — that is why a fronted connection always lands in
-            // the US. A low candidate count keeps Psiphon cycling those few
-            // entries with fresh dial parameters instead of opening up to the
-            // 425 direct entries that are known-dead on this carrier.
+            // Try domain-fronted entries first with high priority, but don't hard-lock
+            // LimitTunnelProtocols to 5 Akamai entries so unfronted/OSSH can follow immediately.
             config.put("InitialLimitTunnelProtocols", JSONArray(PROTOCOLS_FRONTED))
-            config.put("InitialLimitTunnelProtocolsCandidateCount", 30)
-            // A HARD limit as well as the initial preference, so the rung's whole
-            // budget is spent on fronted candidates instead of lapsing back to the
-            // 425 direct entries that are null-routed on this carrier. Rung D is
-            // where direct protocols get their turn.
-            config.put("LimitTunnelProtocols", JSONArray(PROTOCOLS_FRONTED))
-            config.put("ConnectionWorkerPoolSize", 12)
-            // CDN paths are legitimately slower than a direct dial; without this
-            // Psiphon abandons them as if they were dead.
-            config.put("NetworkLatencyMultiplier", 2.0)
+            config.put("InitialLimitTunnelProtocolsCandidateCount", 10)
+            config.put("ConnectionWorkerPoolSize", 16)
+            config.put("NetworkLatencyMultiplier", 1.5)
             applyTacticsOverride(config)
         },
         PsiphonStrategy(
             name = "D",
-            label = "all protocols (direct)",
-            timeoutSeconds = 45,
+            label = "all protocols (direct & tactics)",
+            timeoutSeconds = 20,
             preferredProtocols = PROTOCOLS_DIRECT,
         ) { config ->
-            // No InitialLimitTunnelProtocols at all: Psiphon uses its own full
-            // protocol set and its own replay/tactics ordering. This is the rung
-            // that wins on a carrier which is not blocking anything — SamanTel
-            // connected this way on QUIC-OSSH — and it is also the safety net if
-            // the CDN fronts themselves ever get blocked.
             config.put("ConnectionWorkerPoolSize", 16)
-            // Direct dials do not need tactics either, and with tactics on this
-            // rung was also being forced onto in-proxy — see applyTacticsOverride.
-            applyTacticsOverride(config)
         },
         PsiphonStrategy(
             name = "C",
             label = "in-proxy (peer relay)",
-            timeoutSeconds = 75,
+            timeoutSeconds = 35,
             preferredProtocols = emptyList(),
         ) { config ->
-            // In-proxy routes through other Psiphon users' devices over WebRTC.
-            // Their addresses are residential and not in any carrier blocklist,
-            // which is what makes this rung the last resort that can still work
-            // when every server IP and every CDN front is unreachable.
-            //
-            // Deliberately NOT setting InitialLimitTunnelProtocols here: the
-            // INPROXY-* protocol names do not exist as literals in libgojni.so
-            // (verified with strings — they are assembled at runtime), so passing
-            // one risks failing config validation and killing the whole rung.
-            // The flags below are enough; the log confirms Psiphon then reports
-            // "in-proxy protocol preferred" and dials INPROXY-WEBRTC-OSSH itself.
             config.put("InproxyEnabled", true)
             config.put("InproxyAllowClient", true)
             config.put("InproxySkipAwaitFullyConnected", true)
             config.put("ConnectionWorkerPoolSize", 16)
-            config.put("NetworkLatencyMultiplier", 3.0)
+            config.put("NetworkLatencyMultiplier", 2.0)
         },
     )
 
     /**
      * The ladder actually in use for this session.
-     *
-     * Chained runs drop rung C. It is WebRTC, a SOCKS5 upstream cannot carry UDP,
-     * and the field log shows the failure precisely: STUN leaving over the carrier
-     * instead of the tunnel, 34-second ICE gathering, and an untunneled broker DNS
-     * lookup timing out on the link Hamrah-e-Aval null-routes. Keeping it in the
-     * list did not merely waste its 75s budget — the *starting* rung is read from
-     * `psiphon_winning_strategy`, which plain Psiphon had already set to C after a
-     * successful unchained connect, so the very first chained attempt began on the
-     * one rung that cannot work and the chainable rungs never got a fair turn.
-     *
-     * Indices differ between the two lists, which is exactly why the remembered
-     * rung is stored under a separate key per mode — see [winningStrategyKey].
+     * Chained runs use [psiphonLadderChained] directly with all TCP protocols across all 425 servers,
+     * connecting in 1-2s over the established WARP tunnel.
      */
     private val activeLadder: List<PsiphonStrategy>
-        get() = if (chainMode) psiphonLadder.filter { it.name != "C" } else psiphonLadder
+        get() = if (chainMode) psiphonLadderChained else psiphonLadder
 
     /**
      * Where the last-working rung is remembered, per mode.
@@ -658,6 +657,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
 
     companion object {
         const val LOG_TAG = "GuardVpnService"
+        private const val DEFERRED_IDENTITY_PROXY = "__deferred__"
         /**
          * Ceiling on in-place SHARD node swaps per session.
          *
@@ -785,7 +785,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         private const val WATCHDOG_INTERVAL_S = 30L
 
         /** Auto-reconnect backoff in seconds; the last entry repeats forever. */
-        private val RECONNECT_BACKOFF_S = longArrayOf(5, 15, 30, 60, 120)
+        private val RECONNECT_BACKOFF_S = longArrayOf(3, 8, 15, 25)
 
         /**
          * Quick-reconnect timings.
@@ -1214,6 +1214,17 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
     }
 
     override fun onDiagnosticMessage(message: String) {
+        if (message.contains("s0 proxy accept error") &&
+            message.contains("0x03, not 0x01")
+        ) {
+            // Count, don't print: one line per session is enough to prove the
+            // filter is live without drowning the next real diagnostic.
+            if (!psiphonUdpFilteredLogged) {
+                psiphonUdpFilteredLogged = true
+                ConnectionLog.record("Psiphon: UDP ASSOCIATE not supported — filtered (TCP sites unaffected)")
+            }
+            return
+        }
         ConnectionLog.record("Psiphon: $message")
         // Capture the protocol that actually carried the tunnel.
         //
@@ -1317,8 +1328,9 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             // these, so a network with honest DNS still resolves normally if the
             // alternate ports are the ones being blocked.
             put("DNSResolverPreferredAlternateServers", JSONArray(PSIPHON_ALTERNATE_DNS))
-            put("DNSResolverPreferAlternateServerProbability", 1.0)
+            put("DNSResolverPreferAlternateServerProbability", 0.85)
             put("DNSResolverAttemptsPerPreferredServer", 2)
+            put("DNSResolverRequestTimeoutMilliseconds", 2000)
             // Psiphon-over-WARP: dial out through the core's SOCKS listener, so
             // every Psiphon connection leaves inside the WARP tunnel.
             //
@@ -1404,29 +1416,14 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         // cannot carry.
         if (chainMode) {
             config.put("LimitTunnelProtocols", JSONArray(PROTOCOLS_CHAINABLE))
-
-            // The rung's ORDERING is kept, just narrowed to what can cross the
-            // proxy. Dropping it entirely would collapse rung A into rung D, and
-            // rung A's "fronted first" is the behaviour that works on
-            // Hamrah-e-Aval, where every direct dial is null-routed.
-            val preference = config.optJSONArray("InitialLimitTunnelProtocols")
-            if (preference != null) {
-                val chainable = (0 until preference.length())
-                    .map(preference::getString)
-                    .filter(PROTOCOLS_CHAINABLE::contains)
-                if (chainable.isEmpty()) {
-                    config.remove("InitialLimitTunnelProtocols")
-                    config.remove("InitialLimitTunnelProtocolsCandidateCount")
-                } else {
-                    config.put("InitialLimitTunnelProtocols", JSONArray(chainable))
-                }
-            }
+            config.remove("InitialLimitTunnelProtocols")
+            config.remove("InitialLimitTunnelProtocolsCandidateCount")
 
             // In-proxy off explicitly: rung C is already filtered out of
             // activeLadder, but the base config must not leave the door open.
             config.put("InproxyEnabled", false)
             config.put("InproxyAllowClient", false)
-            ConnectionLog.record("Chain: TCP-only protocols (a SOCKS proxy cannot carry UDP)")
+            ConnectionLog.record("Chain: all TCP-only protocols enabled directly over WARP")
         }
         // Stated once per attempt so a support log proves the resolver was in
         // play. Without it, a future "IP is bogon" log would be impossible to
@@ -1460,6 +1457,15 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             } catch (e: Exception) {
                 ConnectionLog.record("No server_entries.txt in assets: ${e.message}")
                 ""
+            }
+            // Android CA store for Go crypto/x509 TLS handshake (must be a single directory; colon breaks Go)
+            runCatching {
+                val certDir = when {
+                    File("/system/etc/security/cacerts").isDirectory -> "/system/etc/security/cacerts"
+                    File("/apex/com.android.conscrypt/cacerts").isDirectory -> "/apex/com.android.conscrypt/cacerts"
+                    else -> "/system/etc/security/cacerts"
+                }
+                android.system.Os.setenv("SSL_CERT_DIR", certDir, true)
             }
             // Fire-and-forget: Psiphon connects asynchronously.
             // onListeningSocksProxyPort() saves the port.
@@ -1503,9 +1509,14 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             strategy.timeoutSeconds
         }
         val budget = seconds.toLong() + 8L
-        ladderTimer = ladderScheduler.schedule({
-            if (ladderActive.get() && !psiphonVpnActivated) escalateLadder()
-        }, budget, TimeUnit.SECONDS)
+        ladderTimer = try {
+            ladderScheduler.schedule({
+                if (ladderActive.get() && !psiphonVpnActivated) escalateLadder()
+            }, budget, TimeUnit.SECONDS)
+        } catch (e: Exception) {
+            Log.w(LOG_TAG, "Failed to schedule ladder timer: ${e.message}")
+            null
+        }
     }
 
 
@@ -1560,10 +1571,15 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
     private fun scheduleLadderAttribution() {
         if (!attributionPending.compareAndSet(false, true)) return
         val rungAtConnect = ladderIndex
-        ladderScheduler.schedule({
+        try {
+            ladderScheduler.schedule({
+                attributionPending.set(false)
+                if (!stopRequested.get()) recordLadderWinner(rungAtConnect)
+            }, 2, TimeUnit.SECONDS)
+        } catch (e: Exception) {
             attributionPending.set(false)
-            if (!stopRequested.get()) recordLadderWinner(rungAtConnect)
-        }, 2, TimeUnit.SECONDS)
+            Log.w(LOG_TAG, "Failed to schedule ladder attribution: ${e.message}")
+        }
     }
 
     /**
@@ -1687,14 +1703,18 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                     "continuing with all countries from strategy ${ladder.getOrNull(ladderIndex)?.name ?: "?"}"
             )
             sendStatus(STATUS_CONNECTING, "Trying all countries…")
-            worker.execute {
-                if (stopRequested.get()) return@execute
-                try { psiphonTunnel?.stop() } catch (_: Exception) {}
-                psiphonTunnel = null
-                activeSocksPort = plannedSocksPort()
-                try { Thread.sleep(1200) } catch (_: InterruptedException) {}
-                if (stopRequested.get()) return@execute
-                startPsiphonTunnel()
+            try {
+                worker.execute {
+                    if (stopRequested.get()) return@execute
+                    try { psiphonTunnel?.stop() } catch (_: Exception) {}
+                    psiphonTunnel = null
+                    activeSocksPort = plannedSocksPort()
+                    try { Thread.sleep(1200) } catch (_: InterruptedException) {}
+                    if (stopRequested.get()) return@execute
+                    startPsiphonTunnel()
+                }
+            } catch (e: Exception) {
+                Log.w(LOG_TAG, "Failed to dispatch escalateLadder on worker: ${e.message}")
             }
             return
         }
@@ -1727,15 +1747,19 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         )
         sendStatus(STATUS_CONNECTING, "Trying ${next.label}...")
 
-        worker.execute {
-            if (stopRequested.get()) return@execute
-            // Tear down only the Psiphon controller. The TUN stays up.
-            try { psiphonTunnel?.stop() } catch (_: Exception) {}
-            psiphonTunnel = null
-            activeSocksPort = plannedSocksPort()
-            try { Thread.sleep(1200) } catch (_: InterruptedException) {}
-            if (stopRequested.get()) return@execute
-            startPsiphonTunnel()
+        try {
+            worker.execute {
+                if (stopRequested.get()) return@execute
+                // Tear down only the Psiphon controller. The TUN stays up.
+                try { psiphonTunnel?.stop() } catch (_: Exception) {}
+                psiphonTunnel = null
+                activeSocksPort = plannedSocksPort()
+                try { Thread.sleep(1200) } catch (_: InterruptedException) {}
+                if (stopRequested.get()) return@execute
+                startPsiphonTunnel()
+            }
+        } catch (e: Exception) {
+            Log.w(LOG_TAG, "Failed to dispatch escalateLadder on worker: ${e.message}")
         }
     }
 
@@ -1841,10 +1865,11 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             ConnectionLog.record("Paused; the chain's outer-leg failure is ignored")
             return
         }
-        // Keeping the service alive is a precondition of the seal: stopSelf()
-        // releases the blocking TUN's fd and the OS restores carrier networking,
-        // which is the leak the switch exists to prevent.
-        stopTunnel(notify = false, teardownService = !sealing)
+        // Keeping the service alive is a precondition of the seal and of auto-reconnect:
+        // stopSelf() releases the blocking TUN's fd and tears down the service, which
+        // destroys schedulers and kills any scheduled retry or reconnect.
+        val keepService = sealing || willAutoReconnect() || reconnectRequested.get()
+        stopTunnel(notify = false, teardownService = !keepService)
         // A quick reconnect owns the service: Psiphon, Tor, SHARD and the chain all
         // report a mid-teardown failure through here, and killing the service would
         // strand the restart the user just asked for — the same defect the native
@@ -2001,70 +2026,43 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                     // here would not run until the core had exited — which is the
                     // very thing we are waiting for, and on the SOCKS-mode paths it
                     // can be seconds. ladderScheduler is idle while connected.
-                    ladderScheduler.schedule({
-                        try {
-                            // Two things have to be true before the restart can run,
-                            // and they finish at different moments:
-                            //
-                            //  * the core has to be out of the way, or
-                            //    NativeCore.start() returns "already running";
-                            //  * `connected` has to be back to false, because
-                            //    startTunnel() opens with
-                            //    `connected.compareAndSet(false, true)` and RETURNS
-                            //    SILENTLY if it loses. On the native paths that flag
-                            //    is cleared in the core's `finally`, which runs a
-                            //    moment AFTER isRunning() goes false — waiting only on
-                            //    the core would race it, the restart would no-op, and
-                            //    the notification's Reconnect would read as Disconnect
-                            //    all over again. On the SOCKS-front paths stopTunnel
-                            //    already cleared it inline, so this costs nothing.
-                            var waited = 0
-                            while ((NativeCore.isRunning() || connected.get()) &&
-                                waited < RECONNECT_CORE_WAIT_MS
-                            ) {
-                                Thread.sleep(RECONNECT_POLL_MS)
-                                waited += RECONNECT_POLL_MS.toInt()
-                            }
-                            if (NativeCore.isRunning() || connected.get()) {
-                                // Restarting anyway is not a retry, it is a
-                                // wrong-reason failure: raiseOuterLeg refuses a rung
-                                // while the core is up, and startTunnel's CAS refuses
-                                // the whole start while the old session still holds
-                                // `connected` — either way the user would be left with
-                                // a live notification over a dead tunnel. Report it.
-                                ConnectionLog.record(
-                                    "Quick reconnect: the previous session was still shutting down " +
-                                        "after ${RECONNECT_CORE_WAIT_MS / 1000}s; not restarting"
-                                )
+                    try {
+                        ladderScheduler.schedule({
+                            try {
+                                var waited = 0
+                                while ((NativeCore.isRunning() || connected.get()) &&
+                                    waited < RECONNECT_CORE_WAIT_MS
+                                ) {
+                                    Thread.sleep(RECONNECT_POLL_MS)
+                                    waited += RECONNECT_POLL_MS.toInt()
+                                }
+                                if (NativeCore.isRunning() || connected.get()) {
+                                    ConnectionLog.record(
+                                        "Quick reconnect: the previous session was still shutting down " +
+                                            "after ${RECONNECT_CORE_WAIT_MS / 1000}s; not restarting"
+                                    )
+                                    reconnectRequested.set(false)
+                                    sendStatus(STATUS_FAILED, "Reconnect timed out — tap the dial to connect")
+                                    return@schedule
+                                }
+                                if (userInitiatedStop.get()) {
+                                    ConnectionLog.record(
+                                        "Quick reconnect abandoned: the user disconnected while waiting"
+                                    )
+                                    reconnectRequested.set(false)
+                                    return@schedule
+                                }
+                                reconnectAttempts = 0
+                                startTunnel(config)
+                            } catch (e: Exception) {
+                                ConnectionLog.record("Quick reconnect failed: ${e.message}")
                                 reconnectRequested.set(false)
-                                sendStatus(STATUS_FAILED, "Reconnect timed out — tap the dial to connect")
-                                return@schedule
                             }
-                            // The user can press Disconnect inside the settle window,
-                            // and that latch means "stay off" — startAsForeground would
-                            // otherwise land on a service that is ending.
-                            if (userInitiatedStop.get()) {
-                                ConnectionLog.record(
-                                    "Quick reconnect abandoned: the user disconnected while waiting"
-                                )
-                                reconnectRequested.set(false)
-                                return@schedule
-                            }
-                            reconnectAttempts = 0
-                            startTunnel(config)
-                        } catch (e: Exception) {
-                            ConnectionLog.record("Quick reconnect failed: ${e.message}")
-                            reconnectRequested.set(false)
-                        }
-                        // Deliberately no `finally` clear. isRunning() going false and
-                        // the core's Kotlin `finally` block running are not the same
-                        // instant, and that block is the one reader that must still see
-                        // the latch — clearing it from this thread could win the race
-                        // and hand the old session a stopSelf() under the restart.
-                        // Every reader consumes the latch itself instead, and
-                        // sendStatus clears it on CONNECTED, so it cannot outlive the
-                        // reconnect it belongs to.
-                    }, RECONNECT_SETTLE_MS, TimeUnit.MILLISECONDS)
+                        }, RECONNECT_SETTLE_MS, TimeUnit.MILLISECONDS)
+                    } catch (e: Exception) {
+                        Log.w(LOG_TAG, "Failed to schedule quick reconnect: ${e.message}")
+                        reconnectRequested.set(false)
+                    }
                     }
                 }
             }
@@ -2086,10 +2084,16 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
     override fun onDestroy() {
         cancelAutoReconnect()
         stopTorProgressPolling()
+        stopTrafficPolling()
+        stopWatchdog()
         stopTunnel(notify = false)
         cancelLadderTimer()
-        ladderScheduler.shutdownNow()
-        worker.shutdownNow()
+        synchronized(this) {
+            runCatching { _ladderScheduler?.shutdownNow() }
+            _ladderScheduler = null
+            runCatching { _worker?.shutdownNow() }
+            _worker = null
+        }
         super.onDestroy()
     }
 
@@ -2291,7 +2295,8 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         ladderAttempts = 0
         armRegionPhase()
 
-        worker.execute {
+        try {
+            worker.execute {
             try {
                 // No TUN in SOCKS mode. Constraint 1 above (create the TUN before
                 // either tunnel, so Psiphon's NetworkMonitor does not see tun0
@@ -2361,6 +2366,12 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 failAndStop(e.message ?: "Chain start failed")
             }
         }
+        } catch (e: Exception) {
+            ConnectionLog.record("Chain worker dispatch failed: ${e.message}")
+            chainMode = false
+            psiphonChained = false
+            failAndStop("Failed to start chain worker: ${e.message}")
+        }
     }
 
     /**
@@ -2402,7 +2413,8 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         chainMode = chained
         chainOuterCommitted = false
 
-        worker.execute {
+        try {
+            worker.execute {
             try {
                 val address = Tun2SocksManager.selectPrivateAddress()
                 ConnectionLog.record("Tor: creating TUN before Tor starts")
@@ -2540,6 +2552,13 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 failAndStop(e.message ?: "Tor start failed")
             }
         }
+        } catch (e: Exception) {
+            ConnectionLog.record("Tor worker dispatch failed: ${e.message}")
+            if (chained) stopOuterLeg()
+            chainMode = false
+            psiphonChained = false
+            failAndStop("Failed to start Tor worker: ${e.message}")
+        }
     }
 
     /**
@@ -2575,13 +2594,14 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      * chain exists to achieve for Psiphon.
      */
     private fun startShardTunnel() {
-        worker.execute {
+        try {
+            worker.execute {
             try {
                 val address = Tun2SocksManager.selectPrivateAddress()
                 ConnectionLog.record("SHARD: creating TUN before xray starts")
                 tun = Builder()
                     .setSession("Asha Guard")
-                    .setMtu(Tun2SocksManager.VPN_INTERFACE_MTU)
+                    .setMtu(Tun2SocksManager.SHARD_TUNNEL_MTU)
                     .addAddress(address.ipAddress, address.prefixLength)
                     .addRoute("0.0.0.0", 0)
                     .addRoute(address.subnet, address.prefixLength)
@@ -2623,7 +2643,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                     error("Could not start the UDP front-end")
                 }
                 activeSocksPort = ShardSocksFront.LISTEN_PORT
-                if (!Tun2SocksManager.start(tun!!, ShardSocksFront.LISTEN_PORT)) {
+                if (!Tun2SocksManager.start(tun!!, ShardSocksFront.LISTEN_PORT, mtu = Tun2SocksManager.SHARD_TUNNEL_MTU)) {
                     error("Could not start device routing")
                 }
 
@@ -2640,6 +2660,12 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 ShardManager.stop()
                 failAndStop(e.message ?: "SHARD start failed")
             }
+        }
+        } catch (e: Exception) {
+            ConnectionLog.record("SHARD worker dispatch failed: ${e.message}")
+            ShardSocksFront.stop()
+            ShardManager.stop()
+            failAndStop("Failed to start SHARD worker: ${e.message}")
         }
     }
 
@@ -2664,16 +2690,21 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         shardSampleRx = 0L
         shardSampleAt = 0L
         shardThroughputWrittenAt = 0L
-        torTrafficTask = ladderScheduler.scheduleAtFixedRate({
-            try {
-                if (!ShardSocksFront.isRunning) return@scheduleAtFixedRate
-                if (!shouldSampleTraffic()) return@scheduleAtFixedRate
-                val rx = ShardSocksFront.sessionRx
-                observeShardThroughput(rx)
-                updateTrafficNotification(ShardSocksFront.sessionTx, rx)
-            } catch (_: Exception) {
-            }
-        }, 1L, 1L, TimeUnit.SECONDS)
+        torTrafficTask = try {
+            ladderScheduler.scheduleAtFixedRate({
+                try {
+                    if (!ShardSocksFront.isRunning) return@scheduleAtFixedRate
+                    if (!shouldSampleTraffic()) return@scheduleAtFixedRate
+                    val rx = ShardSocksFront.sessionRx
+                    observeShardThroughput(rx)
+                    updateTrafficNotification(ShardSocksFront.sessionTx, rx)
+                } catch (_: Exception) {
+                }
+            }, 1L, 1L, TimeUnit.SECONDS)
+        } catch (e: Exception) {
+            Log.w(LOG_TAG, "Failed to schedule shard traffic polling: ${e.message}")
+            null
+        }
     }
 
     /**
@@ -2787,14 +2818,19 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      */
     private fun startTrafficPolling() {
         torTrafficTask?.cancel(false)
-        torTrafficTask = ladderScheduler.scheduleAtFixedRate({
-            try {
-                if (!TorSocksFront.isRunning) return@scheduleAtFixedRate
-                if (!shouldSampleTraffic()) return@scheduleAtFixedRate
-                updateTrafficNotification(TorSocksFront.sessionTx, TorSocksFront.sessionRx)
-            } catch (_: Exception) {
-            }
-        }, 1L, 1L, TimeUnit.SECONDS)
+        torTrafficTask = try {
+            ladderScheduler.scheduleAtFixedRate({
+                try {
+                    if (!TorSocksFront.isRunning) return@scheduleAtFixedRate
+                    if (!shouldSampleTraffic()) return@scheduleAtFixedRate
+                    updateTrafficNotification(TorSocksFront.sessionTx, TorSocksFront.sessionRx)
+                } catch (_: Exception) {
+                }
+            }, 1L, 1L, TimeUnit.SECONDS)
+        } catch (e: Exception) {
+            Log.w(LOG_TAG, "Failed to schedule tor traffic polling: ${e.message}")
+            null
+        }
     }
 
     private fun stopTrafficPolling() {
@@ -2841,25 +2877,30 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
     private fun startWatchdog() {
         watchdogTask?.cancel(false)
         reconnectAttempts = 0
-        watchdogTask = ladderScheduler.scheduleWithFixedDelay({
-            try {
-                if (stopRequested.get() || userInitiatedStop.get()) return@scheduleWithFixedDelay
-                if (!connected.get()) return@scheduleWithFixedDelay
-                val dead = tunnelIsDead() ?: return@scheduleWithFixedDelay
-                // SHARD can usually be repaired without a disconnect: the pool has
-                // other nodes and the TUN, tun2socks and the front-end are all still
-                // healthy, so only the process behind the port needs replacing. This
-                // is the "keep testing after connecting" behaviour — a race winner
-                // can die a minute later when its owner rotates the UUID, and that
-                // must not end the session.
-                if (currentProtocol.contains("SHARD") && rotateShardNode(dead)) {
-                    return@scheduleWithFixedDelay
+        watchdogTask = try {
+            ladderScheduler.scheduleWithFixedDelay({
+                try {
+                    if (stopRequested.get() || userInitiatedStop.get()) return@scheduleWithFixedDelay
+                    if (!connected.get()) return@scheduleWithFixedDelay
+                    val dead = tunnelIsDead() ?: return@scheduleWithFixedDelay
+                    // SHARD can usually be repaired without a disconnect: the pool has
+                    // other nodes and the TUN, tun2socks and the front-end are all still
+                    // healthy, so only the process behind the port needs replacing. This
+                    // is the "keep testing after connecting" behaviour — a race winner
+                    // can die a minute later when its owner rotates the UUID, and that
+                    // must not end the session.
+                    if (currentProtocol.contains("SHARD") && rotateShardNode(dead)) {
+                        return@scheduleWithFixedDelay
+                    }
+                    ConnectionLog.record("Watchdog: $dead — reconnecting")
+                    onTunnelLost(dead)
+                } catch (_: Exception) {
                 }
-                ConnectionLog.record("Watchdog: $dead — reconnecting")
-                onTunnelLost(dead)
-            } catch (_: Exception) {
-            }
-        }, WATCHDOG_INTERVAL_S, WATCHDOG_INTERVAL_S, TimeUnit.SECONDS)
+            }, WATCHDOG_INTERVAL_S, WATCHDOG_INTERVAL_S, TimeUnit.SECONDS)
+        } catch (e: Exception) {
+            Log.w(LOG_TAG, "Failed to schedule watchdog task: ${e.message}")
+            null
+        }
     }
 
     /**
@@ -3159,15 +3200,24 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         sendStatus(STATUS_CONNECTING, "Reconnecting after $reason…")
         ConnectionLog.record("Auto reconnect #$reconnectAttempts in ${delay}s")
         reconnectTask?.cancel(false)
-        reconnectTask = ladderScheduler.schedule({
-            try {
-                if (userInitiatedStop.get() || connected.get()) return@schedule
-                startTunnel(config)
-            } catch (e: Exception) {
-                ConnectionLog.record("Auto reconnect failed to start: ${e.message}")
-                scheduleAutoReconnect("start failure")
-            }
-        }, delay, TimeUnit.SECONDS)
+        reconnectTask = try {
+            ladderScheduler.schedule({
+                try {
+                    if (userInitiatedStop.get() || connected.get()) return@schedule
+                    startTunnel(config)
+                } catch (e: Exception) {
+                    ConnectionLog.record("Auto reconnect failed to start: ${e.message}")
+                    scheduleAutoReconnect("start failure")
+                }
+            }, delay, TimeUnit.SECONDS)
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            ConnectionLog.record("Auto reconnect skipped: scheduler is terminated")
+            reconnectTask = null
+            return
+        } catch (e: Exception) {
+            Log.w(LOG_TAG, "Failed to schedule auto reconnect: ${e.message}")
+            null
+        }
     }
 
     private fun cancelAutoReconnect() {
@@ -3184,21 +3234,41 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         connectivityManager = getSystemService(ConnectivityManager::class.java)
         connectivityCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                IdentityProvisioner.clearApiBlockedCache()
+                val caps = connectivityManager?.getNetworkCapabilities(network)
+                val isWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                if (isWifi) {
+                    runCatching {
+                        File(filesDir, "masque-gateway-cache.json").delete()
+                        File(filesDir, "gool-lastconn").delete()
+                        File(filesDir, "mim-lastconn").delete()
+                        Unit
+                    }
+                }
                 // Connectivity restored - reset backoff and try immediately if we're in auto-reconnect
-                if (willAutoReconnect() && !connected.get() && !userInitiatedStop.get()) {
+                if (willAutoReconnect() && !userInitiatedStop.get()) {
+                    if (connected.get()) {
+                        ConnectionLog.record("Network interface changed while connected — restarting tunnel for new route")
+                        reconnectRequested.set(true)
+                        stopTunnel(teardownService = false)
+                    }
                     ConnectionLog.record("NetworkCallback: connectivity restored, resetting backoff and retrying")
                     reconnectAttempts = 0
                     reconnectTask?.cancel(false)
-                    reconnectTask = ladderScheduler.schedule({
-                        try {
-                            if (userInitiatedStop.get() || connected.get()) return@schedule
-                            val config = storedConfig
-                            if (config != null) startTunnel(config)
-                        } catch (e: Exception) {
-                            ConnectionLog.record("Auto reconnect after network restore failed: ${e.message}")
-                            scheduleAutoReconnect("network restore failure")
-                        }
-                    }, 0, TimeUnit.SECONDS)
+                    reconnectTask = runCatching {
+                        ladderScheduler.schedule({
+                            try {
+                                if (userInitiatedStop.get() || connected.get()) return@schedule
+                                val config = storedConfig
+                                if (config != null) startTunnel(config)
+                            } catch (e: Exception) {
+                                ConnectionLog.record("Auto reconnect after network restore failed: ${e.message}")
+                                scheduleAutoReconnect("network restore failure")
+                            }
+                        }, 500, TimeUnit.MILLISECONDS)
+                    }.onFailure {
+                        ConnectionLog.record("Network restore retry skipped: scheduler is terminated")
+                    }.getOrNull()
                 }
             }
 
@@ -3380,19 +3450,60 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             )
             sendStatus(STATUS_CONNECTING, "Raising the WARP leg of the chain: $label…")
 
-            val config = CoreConfig.chainOuterJson(this, protocol)
+            val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+            val rawChosenEnroll = prefs.getString("manual_endpoint", null)?.trim().orEmpty().ifBlank {
+                prefs.getString("clean_ip", null)?.trim().orEmpty()
+            }.ifBlank { null }
+            val chosenEnroll = CoreConfig.formatPeerForProtocol(rawChosenEnroll, protocol)
+            var outerConfig = CoreConfig.chainOuterJson(this, protocol, cleanIpOverride = chosenEnroll)
+            if (!IdentityProvisioner.hasIdentity(this, protocol)) {
+                ConnectionLog.record("Chain: outer leg ($protocol) needs identity provisioning")
+                val shardProxy = provisionIdentityThroughShard(protocol)
+                if (shardProxy != null) {
+                    runCatching {
+                        android.system.Os.setenv("AETHER_SOCKS_PROXY", shardProxy, true)
+                        android.system.Os.setenv("AETHER_UPSTREAM", "socks5h://$shardProxy", true)
+                        val json = JSONObject(outerConfig)
+                        json.put("socks_proxy", shardProxy)
+                        outerConfig = json.toString()
+                    }
+                }
+            }
+            if (protocol.lowercase() in listOf("masque", "mim", "gool", "warp-in-warp")) {
+                runCatching {
+                    android.system.Os.setenv("AETHER_MASQUE_HTTP2", "1", true)
+                    android.system.Os.setenv("AETHER_MASQUE_H2_FRAGMENT", "1", true)
+                    android.system.Os.setenv("AETHER_API_FRAGMENT", "1", true)
+                    android.system.Os.unsetenv("AETHER_WG_PEER")
+                }
+            } else if (protocol.lowercase() in listOf("wireguard", "wg")) {
+                runCatching {
+                    android.system.Os.unsetenv("AETHER_MASQUE_HTTP2")
+                    android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER")
+                }
+            }
+            if (chosenEnroll != null) {
+                runCatching {
+                    android.system.Os.setenv("AETHER_PEER", chosenEnroll, true)
+                    if (protocol.lowercase() in listOf("masque", "mim", "gool", "warp-in-warp")) {
+                        android.system.Os.setenv("AETHER_MASQUE_H2_PEER", chosenEnroll, true)
+                    } else if (protocol.lowercase() in listOf("wireguard", "wg")) {
+                        android.system.Os.setenv("AETHER_WG_PEER", chosenEnroll, true)
+                    }
+                }
+            }
             val started = runCatching {
                 // Provisions or loads this protocol's identity. MASQUE and WireGuard
                 // keep separate ones, and a failure here (a refused registration, no
                 // network) is this rung's failure, not the chain's.
-                NativeCore.prepare(config)
+                NativeCore.prepare(outerConfig)
                 Thread({
                     // Guarded for the same reason as the Tor front proxy's relay
                     // threads: this is a bare thread, so anything escaping it goes
                     // to the default handler and takes the process down instead of
                     // failing this one rung.
                     try {
-                        val result = NativeCore.startProxy(config)
+                        val result = NativeCore.startProxy(outerConfig)
                         if (result != 0 && !stopRequested.get()) {
                             val detail = NativeCore.lastError()
                                 .ifBlank { "exited with code $result" }
@@ -3475,9 +3586,9 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      * from a SIM whose usual transport is blocked, since the winner is remembered.
      */
     private fun chainOuterBudgetMs(protocol: String): Long = when (protocol) {
-        "masque" -> 50_000L
-        "wireguard" -> 40_000L
-        else -> 60_000L
+        "masque" -> 20_000L
+        "wireguard" -> 15_000L
+        else -> 25_000L
     }
 
     /**
@@ -3549,10 +3660,6 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         }
     }.isSuccess
 
-    /**
-     * Start a tunnel. Always whole-device VPN mode — proxy mode was removed, so
-     * there is no longer a `vpnMode` parameter to branch on.
-     */
     private fun startTunnel(config: String) {
         if (!connected.compareAndSet(false, true)) return
         // Claims the service for this session. Every worker below captures the value
@@ -3703,7 +3810,8 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             ladderIndex = rememberedRungIndex()
             ladderAttempts = 0
             armRegionPhase()
-            worker.execute {
+            try {
+                worker.execute {
                 try {
                     ConnectionLog.record("Preparing PSIPHON identity")
                     // PROXY MODE: no TUN, no consent, no tun2socks. Psiphon binds the
@@ -3785,11 +3893,120 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                     stopSelf()
                 }
             }
+            } catch (e: Exception) {
+                ConnectionLog.record("Failed to dispatch Psiphon on worker: ${e.message}")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
             return
         }
 
-        worker.execute {
+        var needsIdentityProxy: String? = null
+        val protocolLower = currentProtocol.lowercase()
+        if (protocolLower.contains("wireguard") ||
+            protocolLower.contains("masque") ||
+            protocolLower.contains("gool") ||
+            protocolLower.contains("warp") ||
+            protocolLower.contains("mim")
+        ) {
+            needsIdentityProxy = DEFERRED_IDENTITY_PROXY
+        }
+
+        try {
+            worker.execute {
             try {
+
+                // Resolve the deferred identity decision on this thread: the
+                // probe (and possibly raising xray) blocks, and ACTION_CONNECT
+                // calls startTunnel on the main thread.
+                var effectiveConfig = config
+                if (needsIdentityProxy == DEFERRED_IDENTITY_PROXY) {
+                    sendStatus(STATUS_CONNECTING, "Retrieving identity…", 10)
+                    needsIdentityProxy = provisionIdentityThroughShard(currentProtocol)
+                    effectiveConfig = if (needsIdentityProxy != null) {
+                        runCatching {
+                            android.system.Os.setenv("AETHER_SOCKS_PROXY", needsIdentityProxy!!, true)
+                            android.system.Os.setenv("AETHER_UPSTREAM", "socks5h://$needsIdentityProxy", true)
+                            val json = JSONObject(config)
+                            json.put("socks_proxy", needsIdentityProxy)
+                            json.toString()
+                        }.getOrElse { config }
+                    } else {
+                        config
+                    }
+                    storedConfig = effectiveConfig
+                }
+
+                if (stopRequested.get()) {
+                    connected.set(false)
+                    sendStatus(STATUS_DISCONNECTED)
+                    return@execute
+                }
+
+                // Aether v2.3.0: Ensure AETHER_ENROLL_ADDRESS is configured for WARP API registration & enrollment
+                val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+                val manualEndpoint = prefs.getString("manual_endpoint", null)?.trim().orEmpty()
+                val storedCleanIp = prefs.getString("clean_ip", null)?.trim().orEmpty()
+                val rawCleanIp = manualEndpoint.takeIf { it.isNotBlank() }
+                    ?: storedCleanIp.takeIf { it.isNotBlank() }
+                val chosenEnrollIp = CoreConfig.formatPeerForProtocol(rawCleanIp, currentProtocol)
+                val enrollHost = rawCleanIp?.substringBefore(":")?.takeIf { it.isNotBlank() } ?: "162.159.192.1"
+                val enrollAddress = "$enrollHost:443"
+                runCatching { android.system.Os.setenv("AETHER_ENROLL_ADDRESS", enrollAddress, true) }
+
+                // Aether v2.3.0 environment configuration
+                if (currentProtocol.lowercase() in listOf("masque", "mim", "gool", "warp-in-warp")) {
+                    runCatching {
+                        val masqueTransport = prefs.getString("default_masque_transport", "h3")?.lowercase() ?: "h3"
+                        if (masqueTransport == "h2") {
+                            android.system.Os.setenv("AETHER_MASQUE_HTTP2", "1", true)
+                        } else {
+                            android.system.Os.unsetenv("AETHER_MASQUE_HTTP2")
+                        }
+                        android.system.Os.setenv("AETHER_MASQUE_H2_FRAGMENT", "1", true)
+                        android.system.Os.setenv("AETHER_API_FRAGMENT", "1", true)
+                        android.system.Os.setenv("AETHER_MASQUE_STARTUP_SECS", "35", true)
+                        android.system.Os.setenv("AETHER_MASQUE_VALIDATE_SECS", "15", true)
+                        android.system.Os.setenv("AETHER_WG_VALIDATE_SECS", "15", true)
+                        android.system.Os.setenv("AETHER_SCAN", "turbo", true)
+                        if (chosenEnrollIp != null) {
+                            android.system.Os.setenv("AETHER_MASQUE_H2_PEER", chosenEnrollIp, true)
+                            android.system.Os.setenv("AETHER_PEER", chosenEnrollIp, true)
+                        } else {
+                            android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER")
+                            android.system.Os.unsetenv("AETHER_PEER")
+                        }
+                    }
+                } else if (currentProtocol.lowercase() in listOf("wireguard", "wg")) {
+                    runCatching {
+                        android.system.Os.unsetenv("AETHER_MASQUE_HTTP2")
+                        android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER")
+                        if (chosenEnrollIp != null) {
+                            android.system.Os.setenv("AETHER_PEER", chosenEnrollIp, true)
+                            android.system.Os.setenv("AETHER_WG_PEER", chosenEnrollIp, true)
+                        } else {
+                            android.system.Os.unsetenv("AETHER_PEER")
+                            android.system.Os.unsetenv("AETHER_WG_PEER")
+                        }
+                    }
+                }
+                if (MtuConfig.isCustom(this, MtuConfig.Method.MASQUE)) {
+                    val mtu = MtuConfig.get(this, MtuConfig.Method.MASQUE).toString()
+                    runCatching { android.system.Os.setenv("AETHER_MASQUE_MTU", mtu, true) }
+                }
+                if (MtuConfig.isCustom(this, MtuConfig.Method.WIREGUARD)) {
+                    val mtu = MtuConfig.get(this, MtuConfig.Method.WIREGUARD).toString()
+                    runCatching { android.system.Os.setenv("AETHER_WG_MTU", mtu, true) }
+                }
+                if (MtuConfig.isCustom(this, MtuConfig.Method.WOW)) {
+                    val mtu = MtuConfig.get(this, MtuConfig.Method.WOW).toString()
+                    runCatching {
+                        android.system.Os.setenv("AETHER_WG_MTU", mtu, true)
+                        android.system.Os.setenv("AETHER_MASQUE_MTU", mtu, true)
+                    }
+                }
+
+                sendStatus(STATUS_CONNECTING, "Starting $currentProtocol…", 20)
                 ConnectionLog.record("Preparing $currentProtocol identity")
                 NativeCore.attach(this)
 
@@ -3811,7 +4028,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 if (proxyMode) {
                     val port = CoreConfig.proxyListenPort(this@GuardVpnService)
                     val host = CoreConfig.proxyBindHost(this@GuardVpnService)
-                    NativeCore.prepare(config)
+                    NativeCore.prepare(effectiveConfig)
                     TunnelStatus.isProxyMode = true
                     TunnelStatus.isNativeTunMode = false
                     ConnectionLog.record(
@@ -3832,7 +4049,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                     startWatchdog()
                     // Blocks until the core exits, exactly like the VPN branch's
                     // NativeCore.start below.
-                    val proxyResult = NativeCore.startProxy(config)
+                    val proxyResult = NativeCore.startProxy(effectiveConfig)
                     // Teardown is NOT done here. `return@execute` from inside a try
                     // still runs the shared `finally`, so detaching, flushing the
                     // counters and deciding between reconnect and stopSelf all happen
@@ -3865,31 +4082,34 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 }
 
                 // VPN MODE: the Rust core binds the Android TUN directly.
-                val addresses = NativeCore.prepare(config)
+                val addresses = NativeCore.prepare(effectiveConfig)
                 if (addresses.organization.isNotBlank()) {
                     ConnectionLog.record("Zero Trust organization ${addresses.organization}")
                 }
                 ConnectionLog.record("Creating Android VPN interface")
+                val warpMtu = MtuConfig.forWarpProtocol(this@GuardVpnService, currentProtocol)
+                ConnectionLog.record("MTU: $warpMtu for $currentProtocol")
                 tun = Builder()
                     .setSession("Asha Guard")
-                    .setMtu(1280)
+                    .setMtu(warpMtu)
                     // applyTunnelAddresses replaces the hardcoded /32 + /128
                     // pair: v0.8.0 identities can carry a real prefix length,
                     // and a WARP identity without a v6 address must not get a
                     // v6 default route.
                     .applyTunnelAddresses(addresses)
-                    .applyDns(config, addresses)
-                    .applyGatewayProxy(config, addresses)
+                    .applyDns(effectiveConfig, addresses)
+                    .applyGatewayProxy(effectiveConfig, addresses)
                     .applyLanAccess(addresses)
                     .applySplitTunneling()
                     // applySplitTunneling() handles app exclusion per mode.
                     .establish() ?: error("Android could not establish the VPN interface")
                 ConnectionLog.record("Scanning gateways for VPN")
+                sendStatus(STATUS_CONNECTING, "Scanning gateways…", 35)
                 // The Rust core is about to bind this TUN fd directly, which
                 // means no local SOCKS listener will exist for this session.
                 // The UI health check must go direct, not via 127.0.0.1.
                 TunnelStatus.isNativeTunMode = true
-                val result = NativeCore.start(config, tun!!.fd)
+                val result = NativeCore.start(effectiveConfig, tun!!.fd)
 
                 // Did the tunnel end on its own, i.e. without the user asking?
                 // That is the case auto-reconnect exists for, and it has to be
@@ -3922,6 +4142,19 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 nativeExitWasUnexpected = false
             } finally {
                 NativeCore.detach()
+                runCatching { android.system.Os.unsetenv("AETHER_ENROLL_ADDRESS") }
+                runCatching { android.system.Os.unsetenv("AETHER_ECH") }
+                runCatching { android.system.Os.unsetenv("AETHER_SOCKS_PROXY") }
+                runCatching { android.system.Os.unsetenv("AETHER_UPSTREAM") }
+                runCatching { android.system.Os.unsetenv("AETHER_API_FRAGMENT") }
+                runCatching { android.system.Os.unsetenv("AETHER_MASQUE_HTTP2") }
+                runCatching { android.system.Os.unsetenv("AETHER_MASQUE_H2_FRAGMENT") }
+                runCatching { android.system.Os.unsetenv("AETHER_PEER") }
+                runCatching { android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER") }
+                runCatching { android.system.Os.unsetenv("AETHER_WG_PEER") }
+                runCatching { android.system.Os.unsetenv("AETHER_MASQUE_MTU") }
+                runCatching { android.system.Os.unsetenv("AETHER_WG_MTU") }
+                stopProvisioningShard()
                 vpnModeActive.set(false)
                 TunnelStatus.isNativeTunMode = false
                 // Cleared for the SOCKS branch above, which is the only thing that
@@ -3994,6 +4227,11 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                     stopSelf()
                 }
             }
+        }
+        } catch (e: Exception) {
+            ConnectionLog.record("NativeCore worker dispatch failed: ${e.message}")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
         }
     }
 
@@ -4129,7 +4367,8 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             return
         }
 
-        if (notify && !connected.get()) sendStatus(STATUS_DISCONNECTED)
+        connected.set(false)
+        if (notify) sendStatus(STATUS_DISCONNECTED)
     }
 
     private fun rebuildKillSwitchVpn() {
@@ -4207,8 +4446,21 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         }
     }
 
+    // The status the row must reflect. sendStatus is the single funnel through
+    // which every state change passes, so these two fields keep the
+    // notification builder honest about CONNECTING vs CONNECTED vs FAILED —
+    // previously the builder could only ever say "VPN connected", which is why
+    // a failed connect left the row frozen on "Connecting…".
+    @Volatile
+    private var lastStatus: String = ""
+
+    @Volatile
+    private var lastDetail: String? = null
+
     protected fun sendStatus(status: String, detail: String? = null, progress: Int = -1) {
         Log.i(LOG_TAG, "status=$status${detail?.let { " detail=$it" } ?: ""}")
+        lastStatus = status
+        if (detail != null) lastDetail = detail
         // Stamp the connect moment here rather than at each call site: there are
         // several paths to CONNECTED (native tunnel ready, Psiphon proxy ready,
         // tun2socks up, reconnect) and every one funnels through sendStatus.
@@ -4234,6 +4486,11 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             .putExtra(EXTRA_STATUS, status)
             .putExtra(EXTRA_PROGRESS, connectProgress)
             .apply { detail?.let { putExtra(EXTRA_DETAIL, it) } })
+        // Mirror the transition into the foreground row. Without this, any
+        // failure branch that keeps the service alive (kill-switch seal, a
+        // pending reconnect, a pause) left the row frozen on the last text —
+        // the "stuck on Connecting…" defect.
+        repostNotification()
         TileService.requestListeningState(
             this,
             ComponentName(this, GuardTileService::class.java),
@@ -4263,14 +4520,19 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      */
     private fun startTorProgressPolling() {
         torProgressTask?.cancel(false)
-        torProgressTask = ladderScheduler.scheduleAtFixedRate({
-            try {
-                if (stopRequested.get()) return@scheduleAtFixedRate
-                val percent = TorManager.progress
-                if (percent in 1..99) publishProgress(percent)
-            } catch (_: Exception) {
-            }
-        }, 1L, 1L, TimeUnit.SECONDS)
+        torProgressTask = try {
+            ladderScheduler.scheduleAtFixedRate({
+                try {
+                    if (stopRequested.get()) return@scheduleAtFixedRate
+                    val percent = TorManager.progress
+                    if (percent in 1..99) publishProgress(percent)
+                } catch (_: Exception) {
+                }
+            }, 1L, 1L, TimeUnit.SECONDS)
+        } catch (e: Exception) {
+            Log.w(LOG_TAG, "Failed to schedule tor progress polling: ${e.message}")
+            null
+        }
     }
 
     private fun stopTorProgressPolling() {
@@ -4467,6 +4729,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         // out a window inherited from the tunnel that just died.
         prevSpeedSampleMs = 0
         lastTrafficSampleMs = 0
+        psiphonUdpFilteredLogged = false
         // Per-session latch: each tunnel gets one chance to prove its transport
         // works. Without this reset the flag would stay set for the life of the
         // process, so a later session on a different transport (or a different
@@ -4650,19 +4913,36 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         }
         val subtitle = if (country.isNotBlank()) "$method • $country" else method
 
-        // Proxy mode must not claim "VPN connected": nothing is tunnelled device-wide,
-        // and a user who reads that and then finds Chrome on their real IP would be
-        // right to call it a lie. The port is in the title because it is the one
-        // thing they need and the only place they can see it while the app is closed.
-        val title = if (proxyMode) {
-            "SOCKS proxy on ${CoreConfig.proxyListenPort(this)}"
-        } else {
-            "VPN connected"
+        // State-aware row text. lastStatus/lastDetail are funnelled through
+        // sendStatus, so the row now tells the truth in every branch that
+        // keeps the service alive — including a failed connect, which used to
+        // be indistinguishable from a working one ("Connecting…" forever).
+        //
+        // NOTE: `connected` is a session LATCH — startTunnel sets it true on
+        // entry, long before the tunnel carries traffic. It must never gate
+        // the connecting state; only lastStatus may.
+        val failed = lastStatus == STATUS_FAILED
+        val connectedNow = lastStatus == STATUS_CONNECTED
+        val connecting = !failed && !connectedNow &&
+            (lastStatus == STATUS_CONNECTING || lastStatus == STATUS_STARTING ||
+                lastStatus == STATUS_SCANNING || lastStatus.isEmpty())
+
+        val title = when {
+            failed -> "Connection failed"
+            connecting -> if (connectProgress >= 0) "Connecting… $connectProgress%" else "Connecting…"
+            proxyMode -> "SOCKS proxy on ${CoreConfig.proxyListenPort(this)}"
+            else -> "VPN connected"
+        }
+
+        val contentText = when {
+            failed -> (lastDetail ?: "Tap to open the app for details").let { if (it.length > 80) it.take(77) + "…" else it }
+            connecting -> (lastDetail ?: prettyProtocol()).let { if (it.length > 80) it.take(77) + "…" else it }
+            else -> subtitle
         }
 
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
-            .setContentText(subtitle)
+            .setContentText(contentText)
             .setSmallIcon(R.drawable.ic_notification)
             .apply {
                 appBadge()?.let { setLargeIcon(it) }
@@ -5023,5 +5303,38 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
 
         ConnectionLog.record("DNS forced to public resolvers, carrier DNS excluded")
         return this
+    }
+
+    /**
+     * Give a fresh install a WARP identity on a carrier that blocked
+     * api.cloudflareclient.com.
+     *
+     * Raises SHARD — the one transport with no dependency on that API — and lets
+     * the core register through xray's SOCKS listener.
+     */
+    private fun provisionIdentityThroughShard(protocol: String): String? {
+        if (IdentityProvisioner.hasIdentity(this, protocol)) return null
+        val outcome = IdentityProvisioner.probeAndRaiseShard(
+            this,
+            probe = !IdentityProvisioner.apiAlreadyMeasuredBlocked(),
+        )
+        if (outcome.direct) return null
+        val listener = outcome.listener ?: run {
+            ConnectionLog.record("Identity: SHARD could not start to provision through")
+            return null
+        }
+        provisionedShardOurselves = !IdentityProvisioner.shardWasAlreadyRunning
+        ConnectionLog.record("Identity: account API blocked — provisioning through SHARD")
+        return listener
+    }
+
+    /**
+     * Take the SHARD session that [provisionIdentityThroughShard] raised back
+     * down, once the identity it was raised for is settled.
+     */
+    private fun stopProvisioningShard() {
+        if (!provisionedShardOurselves) return
+        provisionedShardOurselves = false
+        IdentityProvisioner.releaseShardListener(startedOurselves = true)
     }
 }

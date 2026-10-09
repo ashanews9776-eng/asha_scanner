@@ -110,6 +110,9 @@ object RemotePolicy {
     private const val MAX_HOSTS = 64
     private const val MAX_SANCTIONED = 64
 
+    /** Same cap discipline as the lists above; nobody needs more than a few. */
+    private const val MAX_EXIT_ENDPOINTS = 8
+
     /**
      * How much of an oversized array is even looked at.
      *
@@ -153,6 +156,52 @@ object RemotePolicy {
     private val DOTTED_QUAD = Regex("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$")
 
     /**
+     * Endpoint entries proven to exit in a specific country, for a specific set
+     * of transports, measured from a real Iranian phone.
+     */
+    private fun validateExitEndpoints(array: org.json.JSONArray?): List<ExitEndpoint>? {
+        if (array == null) return null
+        val out = ArrayList<ExitEndpoint>(4)
+        var rejected = 0
+        val limit = minOf(array.length(), MAX_EXIT_ENDPOINTS * SCAN_FACTOR)
+        for (index in 0 until limit) {
+            val entry = array.optJSONObject(index) ?: continue
+            val endpoint = entry.optString("endpoint").trim()
+            val host = endpoint.substringBefore(':').trim()
+            val port = endpoint.substringAfter(':', "").trim()
+            val country = entry.optString("country").trim().uppercase()
+            val transports = entry.optJSONArray("transports")
+                ?.let { 0.until(it.length()).mapNotNull { i -> it.optString(i).trim().uppercase() } }
+                .orEmpty()
+            if (host.isEmpty() || port.isEmpty() ||
+                port.toIntOrNull() !in 1..65535 ||
+                !DOTTED_QUAD_HOST.matches(host) ||
+                country.length != 2 || !country.all { it in 'A'..'Z' } ||
+                transports.none { it in WARP_TRANSPORTS }
+            ) {
+                rejected++
+                continue
+            }
+            out.add(ExitEndpoint(endpoint, country, transports))
+            if (out.size >= MAX_EXIT_ENDPOINTS) break
+        }
+        if (rejected > 0) ConnectionLog.record("$TAG rejected $rejected exit-endpoint entry/entries")
+        return out.takeIf { it.isNotEmpty() }
+    }
+
+    /** `host:port` where host is a dotted quad — no hostname dialling here. */
+    private val DOTTED_QUAD_HOST = Regex("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$")
+
+    /** The transports an exit endpoint can be injected into. */
+    private val WARP_TRANSPORTS = setOf("MASQUE", "WIREGUARD", "GOOL", "MIM")
+
+    /**
+     * One validated entry: an endpoint, the country it exits in, who may
+     * dial it.
+     */
+    class ExitEndpoint(val endpoint: String, val country: String, val transports: List<String>)
+
+    /**
      * Two-label public suffixes a `*.` entry may not expand to.
      *
      * `*.example.com` is the intended shape. `*.co.uk` is the same syntax and
@@ -181,9 +230,14 @@ object RemotePolicy {
      * entirely.
      */
     val BUILTIN_EDGES = listOf(
+        "162.159.192.1",
+        "162.159.193.1",
         "104.21.70.21",
         "104.21.33.59",
         "188.114.97.0",
+        "188.114.97.6",
+        "188.114.96.1",
+        "188.114.97.1",
     )
 
     /**
@@ -235,6 +289,7 @@ object RemotePolicy {
         val edges: List<String>,
         val geoBlocked: List<String>,
         val sanctioned: List<String>,
+        val exitEndpoints: List<ExitEndpoint>,
     )
 
     private fun prefs(context: Context) =
@@ -268,13 +323,30 @@ object RemotePolicy {
      */
     fun sanctionedHosts(context: Context): List<String> = policy(context).sanctioned
 
+    /**
+     * Exit endpoints proven to exit in a given country, for the transports that
+     * may dial them. Empty when the policy file has none — the connect path
+     * then behaves exactly as before this list existed.
+     */
+    fun exitEndpointsFor(context: Context, country: String, transport: String): List<ExitEndpoint> =
+        exitEndpointsFor(context, listOf(country), transport)
+
+    /**
+     * The multi-country form: every seed whose country is in [countries] and whose
+     * transports list admits [transport], in FILE order.
+     */
+    fun exitEndpointsFor(context: Context, countries: List<String>, transport: String): List<ExitEndpoint> =
+        policy(context).exitEndpoints.filter {
+            it.country in countries && transport in it.transports
+        }
+
     private fun policy(context: Context): Policy {
         cached?.let { return it }
         // Read once per process. The connect path calls this, so it must not be a
         // file read per rule — and it cannot be a lazy initialiser either, because
         // a successful refresh has to be able to invalidate it.
         val loaded = readCache(context)
-            ?: Policy(BUILTIN_EDGES, BUILTIN_GEOBLOCKED, BUILTIN_SANCTIONED)
+            ?: Policy(BUILTIN_EDGES, BUILTIN_GEOBLOCKED, BUILTIN_SANCTIONED, emptyList())
         cached = loaded
         return loaded
     }
@@ -309,7 +381,8 @@ object RemotePolicy {
         val edges = validateEdges(root.optJSONArray("edges"))
         val hosts = validateHosts(root.optJSONArray("geoblocked"))
         val sanctioned = validateSanctioned(root.optJSONArray("sanctioned"))
-        if (edges == null && hosts == null && sanctioned == null) return null
+        val exitEndpoints = validateExitEndpoints(root.optJSONArray("exit_endpoints"))
+        if (edges == null && hosts == null && sanctioned == null && exitEndpoints == null) return null
         // Fall back to what is currently in force for the list that failed, not to
         // the shipped constants: a typo in one array must not revert months of edits
         // to another. `cached` is null on the first read, and readCache's own parse()
@@ -319,6 +392,7 @@ object RemotePolicy {
             edges ?: current?.edges ?: BUILTIN_EDGES,
             hosts ?: current?.geoBlocked ?: BUILTIN_GEOBLOCKED,
             sanctioned ?: current?.sanctioned ?: BUILTIN_SANCTIONED,
+            exitEndpoints ?: current?.exitEndpoints ?: emptyList(),
         )
     }
 

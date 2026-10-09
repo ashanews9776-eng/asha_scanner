@@ -284,6 +284,55 @@ interface AppStrings {
     val dialModeIpv4: String
     val dialModeIpv6: String
     val unsafeFingerprint: String
+
+    // Per-App Split Tunneling
+    val splitTunnelTitle: String
+    val splitTunnelSubtitle: String
+    val splitModeAll: String
+    val splitModeInclude: String
+    val splitModeExclude: String
+    val searchApps: String
+    val showSystemApps: String
+    val selectAll: String
+    val deselectAll: String
+    val appsSelected: String
+    val noAppsFound: String
+    val perAppRouting: String
+    val perAppRoutingDesc: String
+
+    // MTU Optimizer
+    val mtuOptimizerTitle: String
+    val mtuOptimizerDesc: String
+    val measureMtu: String
+    val measuringMtu: String
+    val pathMtuFound: String
+    val recommendedMtu: String
+    val applyMtu: String
+    val mtuApplied: String
+    val mtuVpnActiveWarning: String
+
+    // Speed Test
+    val speedTestTitle: String
+    val speedTestSubtitle: String
+    val startSpeedTest: String
+    val stopSpeedTest: String
+    val pingLatency: String
+    val jitter: String
+    val downloadSpeed: String
+    val uploadSpeed: String
+    val loadedPing: String
+    val dataUsed: String
+    val speedTesting: String
+    val speedTestDone: String
+
+    // Exit IP & Geo Lookup
+    val ipLeakTitle: String
+    val checkIpLocation: String
+    val checkingIp: String
+    val ipSecure: String
+    val ipLeakWarning: String
+    val city: String
+    val isp: String
 }
 
 
@@ -552,6 +601,55 @@ internal object EN : AppStrings {
     override val dialModeIpv4: String = "IPv4 Only"
     override val dialModeIpv6: String = "IPv6 Only"
     override val unsafeFingerprint: String = "Unsafe (Custom TLS)"
+
+    // Per-App Split Tunneling
+    override val splitTunnelTitle: String = "Per-App Routing"
+    override val splitTunnelSubtitle: String = "Choose which apps tunnel through VPN or bypass directly"
+    override val splitModeAll: String = "All Apps"
+    override val splitModeInclude: String = "Only Selected Apps"
+    override val splitModeExclude: String = "Exclude Selected Apps"
+    override val searchApps: String = "Search apps..."
+    override val showSystemApps: String = "Show system apps"
+    override val selectAll: String = "Select All"
+    override val deselectAll: String = "Clear"
+    override val appsSelected: String = "apps selected"
+    override val noAppsFound: String = "No applications found"
+    override val perAppRouting: String = "Per-App Proxy"
+    override val perAppRoutingDesc: String = "Route or exclude specific applications from the VPN tunnel"
+
+    // MTU Optimizer
+    override val mtuOptimizerTitle: String = "MTU Optimizer"
+    override val mtuOptimizerDesc: String = "Discover the exact unfragmented Path MTU of your network to eliminate packet loss"
+    override val measureMtu: String = "Optimize MTU"
+    override val measuringMtu: String = "Probing Path MTU..."
+    override val pathMtuFound: String = "Path MTU"
+    override val recommendedMtu: String = "Recommended MTU"
+    override val applyMtu: String = "Apply to VPN"
+    override val mtuApplied: String = "Optimal MTU applied successfully!"
+    override val mtuVpnActiveWarning: String = "Disconnect VPN to measure carrier link MTU accurately."
+
+    // Speed Test
+    override val speedTestTitle: String = "Speed Test"
+    override val speedTestSubtitle: String = "Multi-stream throughput test via Cloudflare infrastructure"
+    override val startSpeedTest: String = "Start Test"
+    override val stopSpeedTest: String = "Stop"
+    override val pingLatency: String = "Ping"
+    override val jitter: String = "Jitter"
+    override val downloadSpeed: String = "Download"
+    override val uploadSpeed: String = "Upload"
+    override val loadedPing: String = "Loaded Ping"
+    override val dataUsed: String = "Data Used"
+    override val speedTesting: String = "Testing..."
+    override val speedTestDone: String = "Test Complete"
+
+    // Exit IP & Geo Lookup
+    override val ipLeakTitle: String = "Exit IP & Location"
+    override val checkIpLocation: String = "Check IP"
+    override val checkingIp: String = "Checking..."
+    override val ipSecure: String = "SECURE (Outside Iran)"
+    override val ipLeakWarning: String = "DIRECT / LEAK (Inside Iran)"
+    override val city: String = "City"
+    override val isp: String = "ISP"
 }
 
 
@@ -820,6 +918,55 @@ internal object FA : AppStrings {
     override val dialModeIpv4: String = "فقط IPv4"
     override val dialModeIpv6: String = "فقط IPv6"
     override val unsafeFingerprint: String = "نامطمئن (سفارشی بدون شبیه‌سازی)"
+
+    // Per-App Split Tunneling
+    override val splitTunnelTitle: String = "تفکیک برنامه‌ها (Per-App)"
+    override val splitTunnelSubtitle: String = "انتخاب برنامه‌هایی که از فیلترشکن عبور می‌کنند یا مستقیم متصل می‌شوند"
+    override val splitModeAll: String = "کل برنامه‌ها"
+    override val splitModeInclude: String = "فقط برنامه‌های انتخاب‌شده"
+    override val splitModeExclude: String = "دور زدن برنامه‌های انتخاب‌شده"
+    override val searchApps: String = "جستجوی برنامه..."
+    override val showSystemApps: String = "نمایش برنامه‌های سیستمی"
+    override val selectAll: String = "انتخاب همه"
+    override val deselectAll: String = "پاک کردن"
+    override val appsSelected: String = "برنامه انتخاب‌شده"
+    override val noAppsFound: String = "برنامه‌ای یافت نشد"
+    override val perAppRouting: String = "تفکیک برنامه‌ها"
+    override val perAppRoutingDesc: String = "تعیین برنامه‌های متصل به فیلترشکن یا اتصال مستقیم برنامه‌های داخلی"
+
+    // MTU Optimizer
+    override val mtuOptimizerTitle: String = "بهینه‌ساز هوشمند MTU"
+    override val mtuOptimizerDesc: String = "محاسبه دقیق حداکثر اندازه پکت (Path MTU) بدون شکستگی جهت جلوگیری از افت سرعت و قطعی تانل"
+    override val measureMtu: String = "محاسبه خودکار MTU"
+    override val measuringMtu: String = "در حال تست بسته‌های شبکه..."
+    override val pathMtuFound: String = "اندازه پکت مسیر (Path MTU)"
+    override val recommendedMtu: String = "مقدار پیشنهادی"
+    override val applyMtu: String = "اعمال روی فیلترشکن"
+    override val mtuApplied: String = "مقدار بهینه MTU با موفقیت اعمال شد!"
+    override val mtuVpnActiveWarning: String = "برای محاسبه دقیق MTU، ابتدا فیلترشکن را قطع کنید."
+
+    // Speed Test
+    override val speedTestTitle: String = "تست سرعت اینترنت"
+    override val speedTestSubtitle: String = "تست چندمسیره سرعت دانلود، آپلود، پینگ و جیتر از زیرساخت کلودفلر"
+    override val startSpeedTest: String = "شروع تست سرعت"
+    override val stopSpeedTest: String = "توقف"
+    override val pingLatency: String = "پینگ"
+    override val jitter: String = "جیتر"
+    override val downloadSpeed: String = "دانلود"
+    override val uploadSpeed: String = "آپلود"
+    override val loadedPing: String = "پینگ زیر بار"
+    override val dataUsed: String = "حجم مصرفی"
+    override val speedTesting: String = "در حال تست..."
+    override val speedTestDone: String = "تست تکمیل شد"
+
+    // Exit IP & Geo Lookup
+    override val ipLeakTitle: String = "آی‌پی و لوکیشن خروجی"
+    override val checkIpLocation: String = "بررسی آی‌پی"
+    override val checkingIp: String = "در حال استعلام..."
+    override val ipSecure: String = "امن (خارج از ایران)"
+    override val ipLeakWarning: String = "مستقیم / بدون محافظت (داخل ایران)"
+    override val city: String = "شهر"
+    override val isp: String = "ارائه‌دهنده اینترنت"
 }
 
 

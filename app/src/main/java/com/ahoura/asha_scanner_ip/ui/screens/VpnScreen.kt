@@ -2,6 +2,8 @@ package com.ahoura.asha_scanner_ip.ui.screens
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -114,17 +116,47 @@ import com.ahoura.asha_scanner_ip.core.guard.PsiphonRegions
 import com.ahoura.asha_scanner_ip.core.guard.TorManager
 import com.ahoura.asha_scanner_ip.core.guard.TorRegions
 
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import com.ahoura.asha_scanner_ip.core.net.GeoInfo
+import com.ahoura.asha_scanner_ip.core.net.GeoLookup
+import com.ahoura.asha_scanner_ip.core.net.MtuOptimizer
+import com.ahoura.asha_scanner_ip.core.net.MtuResult
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
 @Composable
 fun VpnScreen(
     vm: ScanViewModel,
     onBack: () -> Unit,
+    onSplitTunnel: () -> Unit = {},
+    onSpeedTest: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    val activity = context as? Activity
     val clipboard = LocalClipboardManager.current
     val s = LocalStrings.current
     val lang = LocalLang.current
     val fa = lang == Lang.FA
+    val scope = rememberCoroutineScope()
+
+    var showMtuOptimizerDialog by remember { mutableStateOf(false) }
+    var mtuTesting by remember { mutableStateOf(false) }
+    var mtuResult by remember { mutableStateOf<MtuResult?>(null) }
+    var currentMtu by remember { mutableStateOf(CoreConfig.vpnMtu(context)) }
+
+    var checkingGeo by remember { mutableStateOf(false) }
+    var geoInfo by remember { mutableStateOf<GeoInfo?>(null) }
 
     val vpnStats by vm.vpnStats.collectAsState()
     val activeProfile by vm.activeProfile.collectAsState()
@@ -182,6 +214,7 @@ fun VpnScreen(
                 showConfigManager = true
                 return
             }
+            val activity = context.findActivity()
             if (activity != null) {
                 val prepIntent = VpnManager.prepareVpn(activity)
                 if (prepIntent != null) {
@@ -193,6 +226,7 @@ fun VpnScreen(
                 vm.startVpn(context, profile)
             }
         } else {
+            val activity = context.findActivity()
             if (activity != null) {
                 val prepIntent = VpnManager.prepareVpn(activity)
                 if (prepIntent != null) {
@@ -273,8 +307,8 @@ fun VpnScreen(
 
             // ---- Transport Rail Chips ----
             val transports = listOf(
-                "wireguard" to s.transportWireguard,
                 "masque" to s.transportMasque,
+                "wireguard" to s.transportWireguard,
                 "gool" to s.transportGool,
                 "psiphon" to s.transportPsiphon,
                 "tor" to s.transportTor,
@@ -382,11 +416,22 @@ fun VpnScreen(
                     // Detail status line from native engine or Tor poller
                     vpnStats.detailMessage?.let { detail ->
                         if (detail.isNotBlank() && vpnStats.status != VpnStatus.DISCONNECTED) {
+                            val localizedDetail = when {
+                                detail.contains("Retrieving identity", ignoreCase = true) ->
+                                    if (fa) "در حال دریافت کلید، لطفاً چند ثانیه صبر کنید..." else "Retrieving identity, please wait..."
+                                detail.contains("Scanning gateways", ignoreCase = true) ->
+                                    if (fa) "در حال اسکن درگاه‌ها..." else "Scanning gateways…"
+                                detail.contains("Starting", ignoreCase = true) && detail.contains("…") ->
+                                    if (fa) "در حال شروع اتصال..." else detail
+                                detail.contains("Finding a fast node", ignoreCase = true) ->
+                                    if (fa) "یافتن سریع‌ترین سرور..." else detail
+                                else -> detail
+                            }
                             Spacer(Modifier.size(4.dp))
                             Text(
-                                detail,
+                                localizedDetail,
                                 color = TextSecondaryC,
-                                fontFamily = ShareTechMono,
+                                fontFamily = if (fa) Vazirmatn else ShareTechMono,
                                 fontSize = 11.sp,
                             )
                         }
@@ -531,6 +576,12 @@ fun VpnScreen(
                             if (selectedTransport == "custom") {
                                 activeProfile?.let { vm.measurePing(it) }
                             }
+                            scope.launch {
+                                checkingGeo = true
+                                val socks = if (vpnStats.status.isConnected) 1821 else null
+                                geoInfo = GeoLookup.lookup(socks)
+                                checkingGeo = false
+                            }
                         },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -544,6 +595,44 @@ fun VpnScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 11.sp,
                         )
+                    }
+                }
+            }
+
+            // Live Geo & IP Leak Status Display
+            if (checkingGeo) {
+                Spacer(Modifier.size(4.dp))
+                CyberCard(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(color = Accent, modifier = Modifier.size(16.dp))
+                        Text(s.checkingIp, color = TextMutedC, fontSize = 11.sp)
+                    }
+                }
+            } else if (geoInfo != null) {
+                val geo = geoInfo!!
+                Spacer(Modifier.size(4.dp))
+                CyberCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(geo.flagEmoji, fontSize = 16.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(geo.ip, color = Accent, fontFamily = ShareTechMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                            Pill(if (geo.isIran) s.ipLeakWarning else s.ipSecure)
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("${s.city}: ${geo.city ?: "—"}, ${geo.countryName}", color = TextSecondaryC, fontSize = 10.sp)
+                            Text(geo.isp ?: "", color = TextMutedC, fontFamily = ShareTechMono, fontSize = 10.sp)
+                        }
                     }
                 }
             }
@@ -1100,10 +1189,131 @@ fun VpnScreen(
                             placeholder = "e.g. 162.159.192.1:2408 (optional)",
                         )
                     }
+
+                    HorizontalDivider(color = BorderC, thickness = 0.5.dp)
+
+                    // Per-App Routing (Split Tunneling)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSplitTunnel() },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(s.perAppRouting, color = Accent, fontFamily = displayFamily(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(s.perAppRoutingDesc, color = TextSecondaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 10.sp)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = Accent, modifier = Modifier.size(16.dp))
+                    }
+
+                    HorizontalDivider(color = BorderC, thickness = 0.5.dp)
+
+                    // MTU Optimizer
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showMtuOptimizerDialog = true },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(s.mtuOptimizerTitle, color = Accent, fontFamily = displayFamily(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(s.mtuOptimizerDesc, color = TextSecondaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 10.sp)
+                        }
+                        Pill("${currentMtu} B")
+                    }
+
+                    HorizontalDivider(color = BorderC, thickness = 0.5.dp)
+
+                    // Speed Test Shortcut
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSpeedTest() },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(s.speedTestTitle, color = Accent, fontFamily = displayFamily(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(s.speedTestSubtitle, color = TextSecondaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 10.sp)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = Accent, modifier = Modifier.size(16.dp))
+                    }
                 }
             }
 
             Spacer(Modifier.size(16.dp))
+        }
+
+        // MTU Optimizer Dialog
+        if (showMtuOptimizerDialog) {
+            Dialog(onDismissRequest = { showMtuOptimizerDialog = false }) {
+                CyberCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(s.mtuOptimizerTitle, color = Accent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(s.mtuOptimizerDesc, color = TextSecondaryC, fontSize = 11.sp)
+
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Current VPN MTU:", color = TextMutedC, fontSize = 11.sp)
+                            Text("$currentMtu B", color = Accent, fontFamily = ShareTechMono, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        if (mtuTesting) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CircularProgressIndicator(color = Accent, modifier = Modifier.size(16.dp))
+                                Text(s.measuringMtu, color = AccentDim, fontSize = 11.sp)
+                            }
+                        }
+
+                        mtuResult?.let { res ->
+                            when (res) {
+                                is MtuResult.VpnActive -> {
+                                    Text(s.mtuVpnActiveWarning, color = OrangeC, fontSize = 11.sp)
+                                }
+                                is MtuResult.NotMeasurable -> {
+                                    Text("Carrier ICMP probe not answering. Default 1280 is safe.", color = TextMutedC, fontSize = 11.sp)
+                                }
+                                is MtuResult.Measured -> {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text("${s.pathMtuFound}: ${res.pathMtu} B", color = BlueC, fontFamily = ShareTechMono, fontSize = 12.sp)
+                                        Text("Protocol Overhead: ${res.overhead.total} B (${res.overhead.explain()})", color = TextMutedC, fontSize = 10.sp)
+                                        Text("${s.recommendedMtu}: ${res.recommended} B", color = Accent, fontFamily = ShareTechMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
+                                    Spacer(Modifier.size(4.dp))
+                                    Button(
+                                        onClick = {
+                                            CoreConfig.setVpnMtu(context, res.recommended)
+                                            currentMtu = res.recommended
+                                            showMtuOptimizerDialog = false
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.fillMaxWidth().height(40.dp)
+                                    ) {
+                                        Text(s.applyMtu, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!mtuTesting) {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        mtuTesting = true
+                                        mtuResult = null
+                                        mtuResult = MtuOptimizer.optimize(context)
+                                        mtuTesting = false
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = BlueC.copy(alpha = 0.2f)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().height(40.dp)
+                            ) {
+                                Text(s.measureMtu, color = BlueC, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Config Manager Bottom Sheet

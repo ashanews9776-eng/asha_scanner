@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -74,6 +75,7 @@ fun HomeScreen(
     onDiscover: () -> Unit,
     onVpn: () -> Unit,
     onDns: () -> Unit,
+    onSpeedTest: () -> Unit,
     onAbout: () -> Unit,
     onToggleLang: () -> Unit,
 ) {
@@ -126,6 +128,8 @@ fun HomeScreen(
         StaggerIn(5) { MenuItemCard(Icons.Filled.Place, Teal, s.discoverColos, s.discoverColosDesc, active = true, onClick = onDiscover) }
         Spacer(Modifier.size(8.dp))
         StaggerIn(6) { MenuItemCard(Icons.Filled.Dns, GoldC, s.dnsTool, s.dnsToolDesc, active = true, onClick = onDns) }
+        Spacer(Modifier.size(8.dp))
+        StaggerIn(7) { MenuItemCard(Icons.Filled.Speed, Accent, s.speedTestTitle, s.speedTestSubtitle, active = true, onClick = onSpeedTest) }
 
         Spacer(Modifier.size(16.dp))
 

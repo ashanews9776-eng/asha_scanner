@@ -24,9 +24,21 @@ import java.net.SocketException
  */
 object Tun2SocksManager {
 
-    /** Psiphon's convention; the server intercepts this exact address. */
     private const val UDPGW_SERVER_PORT = 7300
     const val VPN_INTERFACE_MTU = 1500
+
+    /**
+     * SHARD's TUN MTU — identical to [VPN_INTERFACE_MTU].
+     *
+     * PattNG parity: this transport is PattNG's VLESS/Reality core
+     * (msn calls it SHARD). PattNG uses one MTU for every method:
+     * AppConfig.VPN_MTU = 1500, SettingsManager.getVpnMtu() defaults to it,
+     * CoreVpnService.builder.setMtu(getVpnMtu()) and TProxyService
+     * tunnel.mtu = getVpnMtu(). The previous 512 was a WebSocket *payload*
+     * ceiling, not a TUN MTU — the real UDP ceiling (500) stays enforced
+     * per-datagram inside ShardSocksFront.
+     */
+    const val SHARD_TUNNEL_MTU = 1500
     const val VPN_INTERFACE_IPV4_NETMASK = "255.255.255.0"
 
     /**
@@ -135,7 +147,12 @@ object Tun2SocksManager {
      * across Psiphon rotations without re-establishing the TUN interface.
      */
     @Synchronized
-    fun start(tunFd: ParcelFileDescriptor, socksProxyPort: Int, dnsOnlyUdpgw: Boolean = false): Boolean {
+    fun start(
+        tunFd: ParcelFileDescriptor,
+        socksProxyPort: Int,
+        dnsOnlyUdpgw: Boolean = false,
+        mtu: Int = VPN_INTERFACE_MTU,
+    ): Boolean {
         if (tun2SocksThread != null) {
             ConnectionLog.record("tun2socks already running")
             return true
@@ -207,7 +224,7 @@ object Tun2SocksManager {
             try {
                 Tun2SocksJniLoader.runTun2Socks(
                     duplicated.detachFd(),
-                    VPN_INTERFACE_MTU,
+                    mtu,
                     address.router,
                     VPN_INTERFACE_IPV4_NETMASK,
                     null, // IPv4-only routing

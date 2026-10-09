@@ -104,6 +104,9 @@ object ShardManager {
     private val running = AtomicBoolean(false)
 
     @Volatile
+    private var stopRequestedDuringStart = false
+
+    @Volatile
     private var process: Process? = null
 
     @Volatile
@@ -198,17 +201,13 @@ object ShardManager {
             line.contains("A unified platform for anti-censorship") ||
             line.contains("infra/conf/serial: Reading config")
 
-    /** Stop the process and forget the session. */
-    @Synchronized
-    fun stop() {
+    /** Kill the process without latching the cancel flag. For internal cleanup. */
+    private fun killProcess() {
         running.set(false)
         activeNode = null
         process?.let { proc ->
             try {
                 proc.destroy()
-                // Give it a moment to close its listeners before anything tries to
-                // bind them again; a leftover listener makes the next connect fail
-                // with "address already in use".
                 if (!proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
                     proc.destroyForcibly()
                 }
@@ -217,6 +216,32 @@ object ShardManager {
         }
         process = null
         logThread = null
+    }
+
+    /** Stop the process and forget the session. Non-blocking to prevent UI ANR. */
+    fun stop() {
+        stopRequestedDuringStart = true
+        val proc = process
+        try {
+            proc?.destroy()
+        } catch (_: Exception) {
+        }
+        Thread({
+            try {
+                if (proc != null && proc.isAlive &&
+                    !proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
+                ) {
+                    proc.destroyForcibly()
+                }
+            } catch (_: Exception) {
+            }
+            if (process === proc) {
+                process = null
+                logThread = null
+            }
+            running.set(false)
+            activeNode = null
+        }, "shard-stop").start()
     }
 
     /** True when the local SOCKS port is accepting, i.e. the tunnel is usable. */
@@ -324,6 +349,7 @@ object ShardManager {
         port: Int = SOCKS_PORT,
     ): Boolean {
         stop()
+        stopRequestedDuringStart = false
         lastError = ""
         listenPort = port
 
@@ -350,12 +376,20 @@ object ShardManager {
         // everything — each slice costs up to RACE_BUDGET_MS.
         var raced: ShardNode? = null
         for (slice in 0 until MAX_RACE_SLICES) {
+            if (stopRequestedDuringStart) {
+                stop()
+                return false
+            }
             val candidates = ranked.drop(slice * RACE_WIDTH).take(RACE_WIDTH)
             if (candidates.isEmpty()) break
             raced = race(context, candidates)
             if (raced != null) break
         }
         val winner = raced ?: return false
+        if (stopRequestedDuringStart) {
+            stop()
+            return false
+        }
 
         // Wildcard only when the user asked for LAN sharing. The port is fixed
         // either way: unlike the Rust core and Psiphon, SHARD's listener is also
@@ -477,6 +511,7 @@ object ShardManager {
     private fun awaitListener(port: Int): Boolean {
         val deadline = System.currentTimeMillis() + 6000
         while (System.currentTimeMillis() < deadline) {
+            if (stopRequestedDuringStart) return false
             if (portAccepts(port, 400)) return true
             if (process?.isAlive != true) return false
             Thread.sleep(120)
@@ -594,6 +629,7 @@ object ShardManager {
             var ready = false
             val deadline = System.currentTimeMillis() + 4000
             while (System.currentTimeMillis() < deadline) {
+                if (stopRequestedDuringStart) return null
                 if (portAccepts(PROBE_BASE_PORT, 300)) {
                     ready = true
                     break
@@ -618,6 +654,7 @@ object ShardManager {
                     // Once someone has won, the remaining probes are pointless
                     // work on a metered link — stop rather than finish politely.
                     if (winner.get() != null) return@execute
+                    if (stopRequestedDuringStart) return@execute
                     val started = System.currentTimeMillis()
                     val ok = ShardProbe.check(PROBE_BASE_PORT + index, PROBE_TIMEOUT_MS)
                     val elapsed = (System.currentTimeMillis() - started).toInt()
@@ -653,8 +690,11 @@ object ShardManager {
         } finally {
             // The probe process must die before the tunnel process starts: they
             // would otherwise fight over nothing, but it is 45 idle outbounds worth
-            // of memory for no reason.
-            stop()
+            // of memory for no reason. killProcess() and NOT stop(): stop() latches
+            // stopRequestedDuringStart, and this finally runs on every normal,
+            // successful slice too — latching here would cancel the connect that
+            // was about to launch its winner.
+            killProcess()
         }
     }
 }

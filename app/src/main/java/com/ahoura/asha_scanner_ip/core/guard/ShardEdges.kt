@@ -72,7 +72,26 @@ object ShardEdges {
      * holds the live list and falls back to the built-in one when it has nothing,
      * so this is now an edit in a JSON file rather than a version bump.
      */
-    fun edges(context: Context): List<String> = RemotePolicy.edges(context)
+    fun edges(context: Context): List<String> {
+        val remote = RemotePolicy.edges(context).toMutableList()
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val cleanIp = prefs.getString("clean_ip", null)?.trim()?.substringBefore(":")
+        if (!cleanIp.isNullOrBlank() && isCloudflareAddress(cleanIp) && cleanIp !in remote) {
+            remote.add(0, cleanIp)
+        }
+        return remote
+    }
+
+    /**
+     * How many distinct addresses one expandable node fans out to: the edge list
+     * plus the subscription's own address (which is always kept — see [expand]).
+     */
+    fun pathsPerNode(context: Context): Int {
+        // With a custom IP the pool is one address per node — see [expand].
+        if (ShardConfigs.hasCustomIp(context)) return 1
+        val edgeList = edges(context)
+        return edgeList.size + 1
+    }
 
     /**
      * Ports Cloudflare terminates. A node on anything else is not fanned out,
@@ -137,6 +156,13 @@ object ShardEdges {
      * nodes it knows nothing about.
      */
     fun expand(context: Context, nodes: List<ShardNode>): List<ShardNode> {
+        // A custom IP pins every outbound to one address, so the edge fan-out
+        // would only multiply near-identical candidates racing that one address.
+        // Collapse it: one entry per node, the address the user chose.
+        if (ShardConfigs.hasCustomIp(context)) {
+            val seen = HashSet<String>()
+            return nodes.filter { seen.add(it.key) }
+        }
         val edges = edges(context)
         val out = ArrayList<ShardNode>(nodes.size * (edges.size + 1))
         val seen = HashSet<String>()
