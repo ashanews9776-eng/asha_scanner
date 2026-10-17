@@ -25,22 +25,17 @@ object NativeCore {
     )
 
     fun prepare(config: String): TunnelAddresses {
-        if (!isLoaded) return TunnelAddresses("10.0.0.1", "")
-        return try {
-            val code = nativePrepare(config)
-            android.util.Log.i("NativeCore", "nativePrepare returned $code, lastError: ${nativeLastError()}")
-            check(code == 0) { nativeLastError() }
-            val result = JSONObject(nativeLastResult())
-            TunnelAddresses(
-                result.getString("ipv4"),
-                result.optString("ipv6"),
-                result.optString("gateway_proxy"),
-                result.optString("organization"),
-            )
-        } catch (t: Throwable) {
-            android.util.Log.e("NativeCore", "prepare failed: ${t.message}", t)
-            TunnelAddresses("10.0.0.1", "")
-        }
+        if (!isLoaded) throw IllegalStateException("Native core not loaded")
+        val code = nativePrepare(config)
+        android.util.Log.i("NativeCore", "nativePrepare returned $code, lastError: ${nativeLastError()}")
+        check(code == 0) { nativeLastError().ifBlank { "prepare failed with code $code" } }
+        val result = JSONObject(nativeLastResult())
+        return TunnelAddresses(
+            result.getString("ipv4"),
+            result.optString("ipv6"),
+            result.optString("gateway_proxy"),
+            result.optString("organization"),
+        )
     }
 
     fun requestEmailCode(team: String, email: String) {

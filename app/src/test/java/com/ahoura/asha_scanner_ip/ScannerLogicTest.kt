@@ -155,6 +155,19 @@ class ScannerLogicTest {
         val directHappy = directOutbound.getJSONObject("streamSettings").getJSONObject("sockopt").getJSONObject("happyEyeballs")
         assertEquals(250, directHappy.getInt("tryDelayMs"))
         assertEquals(2, directHappy.getInt("interleave"))
+
+        // Verify bypassIran rules
+        val iranBypassConfig = com.ahoura.asha_scanner_ip.core.validator.XrayConfigBuilder.buildClientVpnConfig(
+            proxy, "104.16.1.1", bypassIran = true
+        )
+        val routingRules = iranBypassConfig.getJSONObject("routing").getJSONArray("rules")
+        val domainRule = routingRules.getJSONObject(0)
+        val domains = (0 until domainRule.getJSONArray("domain").length()).map {
+            domainRule.getJSONArray("domain").getString(it)
+        }
+        assertTrue("Contains domain:ir", domains.contains("domain:ir"))
+        assertTrue("Contains geosite:category-ir", domains.contains("geosite:category-ir"))
+        assertFalse("Must NOT contain invalid geosite:ir", domains.contains("geosite:ir"))
     }
 
     private fun inAnyRange(ip: String, ranges: List<String>): Boolean {

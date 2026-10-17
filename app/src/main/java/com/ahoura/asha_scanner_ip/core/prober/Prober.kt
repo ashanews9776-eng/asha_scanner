@@ -57,7 +57,7 @@ class Prober(private val cfg: ScanConfig) {
                     }
                     ProbeMode.TLS -> {
                         if (useTls) {
-                            ssl = Tls.handshake(socket, ip, port, sni, emptyList(), insecure = true, tlsTo)
+                            ssl = Tls.handshake(socket, ip, port, sni, emptyList(), insecure = true, tlsTo, antiDpi = cfg.antiDpi)
                             tlsOk = true
                             latencies.add(elapsedMs(start))
                         } else {
@@ -67,7 +67,7 @@ class Prober(private val cfg: ScanConfig) {
                     }
                     ProbeMode.HTTP -> {
                         val resp = if (useTls) {
-                            ssl = Tls.handshake(socket, ip, port, sni, listOf("http/1.1"), insecure = true, tlsTo)
+                            ssl = Tls.handshake(socket, ip, port, sni, listOf("http/1.1"), insecure = true, tlsTo, antiDpi = cfg.antiDpi)
                             tlsOk = true
                             httpTrace(ssl, null, sni, httpTo)
                         } else {

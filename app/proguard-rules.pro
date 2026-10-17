@@ -33,6 +33,12 @@
 -keepclassmembers class com.msnguard.vpn.** { *; }
 -dontwarn com.msnguard.vpn.**
 
+# WhiteAesther Core JNI exports: libwhiteaesther_core.so exports
+# Java_com_whitedns_whiteaesther_core_NativeAetherBridge_* and NativeChainBridge_*
+-keep class com.whitedns.whiteaesther.core.** { *; }
+-keepclassmembers class com.whitedns.whiteaesther.core.** { *; }
+-dontwarn com.whitedns.whiteaesther.core.**
+
 # ── Psiphon Tunnel (libgojni.so) & Tun2Socks ─────────────────────────────────
 -keep class ca.psiphon.** { *; }
 -keep interface ca.psiphon.** { *; }

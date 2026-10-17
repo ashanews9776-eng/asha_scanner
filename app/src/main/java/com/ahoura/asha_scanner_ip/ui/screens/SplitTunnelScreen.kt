@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.ahoura.asha_scanner_ip.core.guard.AppEntry
+import com.ahoura.asha_scanner_ip.core.guard.AppIconCache
 import com.ahoura.asha_scanner_ip.core.guard.SplitTunnelSettings
 import com.ahoura.asha_scanner_ip.ui.components.CyberAppBar
 import com.ahoura.asha_scanner_ip.ui.components.CyberToggle
@@ -82,6 +84,9 @@ fun SplitTunnelScreen(
         val loaded = SplitTunnelSettings.loadInstalledApps(context)
         allApps = loaded
         loading = false
+        val currentInstalled = loaded.map { it.packageName }.toSet()
+        splitSettings.cleanup(currentInstalled)
+        selectedPkgs = splitSettings.packages().toMutableSet()
     }
 
     fun persist(newMode: SplitTunnelSettings.Mode, newPkgs: Set<String>) {
@@ -91,11 +96,13 @@ fun SplitTunnelScreen(
     }
 
     val filteredApps = remember(allApps, searchQuery, showSystem) {
+        val query = searchQuery.trim()
         allApps.filter { app ->
-            (showSystem || !app.isSystem) &&
-                    (searchQuery.isBlank() ||
-                            app.label.contains(searchQuery, ignoreCase = true) ||
-                            app.packageName.contains(searchQuery, ignoreCase = true))
+            val matchesQuery = query.isBlank() ||
+                    app.label.contains(query, ignoreCase = true) ||
+                    app.packageName.contains(query, ignoreCase = true)
+            val matchesSystem = showSystem || !app.isSystem || query.isNotBlank()
+            matchesSystem && matchesQuery
         }
     }
 
@@ -146,6 +153,33 @@ fun SplitTunnelScreen(
         Spacer(Modifier.height(10.dp))
 
         if (mode != SplitTunnelSettings.Mode.ALL) {
+            if (mode == SplitTunnelSettings.Mode.INCLUDE && selectedPkgs.isEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF332005))
+                        .border(0.5.dp, Color(0xFFF59E0B), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = Color(0xFFF59E0B),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = s.splitTunnelNoAppsWarning,
+                        color = Color(0xFFFDE68A),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
             // Search & Options
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -202,6 +236,9 @@ fun SplitTunnelScreen(
                     fontWeight = FontWeight.Bold
                 )
 
+                val visiblePkgs = remember(filteredApps) { filteredApps.map { it.packageName } }
+                val allVisibleSelected = visiblePkgs.isNotEmpty() && selectedPkgs.containsAll(visiblePkgs)
+
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
                         text = s.showSystemApps,
@@ -214,14 +251,13 @@ fun SplitTunnelScreen(
                     )
 
                     Text(
-                        text = if (selectedPkgs.containsAll(filteredApps.map { it.packageName })) s.deselectAll else s.selectAll,
+                        text = if (allVisibleSelected) s.deselectAll else s.selectAll,
                         color = AccentDim,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.clickable {
                             val newSet = selectedPkgs.toMutableSet()
-                            val visiblePkgs = filteredApps.map { it.packageName }
-                            if (newSet.containsAll(visiblePkgs)) {
+                            if (allVisibleSelected) {
                                 newSet.removeAll(visiblePkgs.toSet())
                             } else {
                                 newSet.addAll(visiblePkgs)
@@ -278,9 +314,7 @@ fun SplitTunnelScreen(
                 items(filteredApps, key = { it.packageName }) { app ->
                     val isChecked = selectedPkgs.contains(app.packageName)
                     val iconBitmap = remember(app.packageName) {
-                        runCatching {
-                            pm.getApplicationIcon(app.packageName).toBitmap(96, 96).asImageBitmap()
-                        }.getOrNull()
+                        AppIconCache.get(pm, app.packageName)
                     }
 
                     Row(

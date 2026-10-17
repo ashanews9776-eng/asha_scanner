@@ -77,9 +77,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
+import com.ahoura.asha_scanner_ip.core.guard.SplitTunnelSettings
 import com.ahoura.asha_scanner_ip.core.vpn.VpnManager
 import com.ahoura.asha_scanner_ip.core.vpn.VpnStatus
 import com.ahoura.asha_scanner_ip.ui.ScanViewModel
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.runtime.CompositionLocalProvider
+import com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore
+import com.ahoura.asha_scanner_ip.core.guard.ConnectionStep
+import com.ahoura.asha_scanner_ip.core.guard.StepState
+import com.ahoura.asha_scanner_ip.ui.i18n.AppStrings
 import androidx.compose.foundation.layout.PaddingValues
 import com.ahoura.asha_scanner_ip.ui.components.ConfigManagerBottomSheet
 import com.ahoura.asha_scanner_ip.ui.components.CyberAppBar
@@ -90,6 +98,8 @@ import com.ahoura.asha_scanner_ip.ui.components.LottieSonar
 import com.ahoura.asha_scanner_ip.ui.components.Pill
 import com.ahoura.asha_scanner_ip.ui.components.SectionLabel
 import com.ahoura.asha_scanner_ip.ui.components.ZeroTrustBottomSheet
+import com.ahoura.asha_scanner_ip.ui.components.LivePathButton
+import com.ahoura.asha_scanner_ip.ui.components.LivePathDialog
 import com.ahoura.asha_scanner_ip.ui.i18n.Lang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
@@ -115,6 +125,7 @@ import com.ahoura.asha_scanner_ip.core.guard.IpFormatter
 import com.ahoura.asha_scanner_ip.core.guard.PsiphonRegions
 import com.ahoura.asha_scanner_ip.core.guard.TorManager
 import com.ahoura.asha_scanner_ip.core.guard.TorRegions
+import com.ahoura.asha_scanner_ip.core.guard.TlsFragmentMode
 
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.Button
@@ -182,12 +193,19 @@ fun VpnScreen(
     val zeroTrustToken by vm.zeroTrustToken.collectAsState()
     val zeroTrustTeam by vm.zeroTrustTeam.collectAsState()
     val zeroTrustClientId by vm.zeroTrustClientId.collectAsState()
+    val tlsOptions by vm.tlsOptions.collectAsState()
 
     var showConfigManager by remember { mutableStateOf(false) }
     var showZeroTrustSheet by remember { mutableStateOf(false) }
     var showPsiphonCountryDialog by remember { mutableStateOf(false) }
     var showTorCountryDialog by remember { mutableStateOf(false) }
+    var showLivePathDialog by remember { mutableStateOf(false) }
     var pendingConnect by remember { mutableStateOf(false) }
+
+    val quicBlock by vm.guardQuicBlock.collectAsState()
+    val webRtcBlock by vm.guardWebRtcBlock.collectAsState()
+    val ipv6Block by vm.guardIpv6Block.collectAsState()
+    val dnsSinkhole by vm.guardDnsSinkhole.collectAsState()
 
     fun needsNotificationPermission() =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -307,7 +325,9 @@ fun VpnScreen(
 
             // ---- Transport Rail Chips ----
             val transports = listOf(
+                "pow" to s.transportPow,
                 "masque" to s.transportMasque,
+                "wom" to s.transportWom,
                 "wireguard" to s.transportWireguard,
                 "gool" to s.transportGool,
                 "psiphon" to s.transportPsiphon,
@@ -474,6 +494,13 @@ fun VpnScreen(
                 }
             }
 
+            // ---- Connection Steps Live Card ("مراحل اتصال") ----
+            ConnectionStepsCard(
+                s = s,
+                lang = lang,
+                vpnStatus = vpnStats.status,
+            )
+
             // ---- Telemetry Stats Panel (Ping, Speed, Exit IP) ----
             // IntrinsicSize.Min stretches every sibling to the tallest box, so the
             // ping readout, the speed/exit card and the ping action button always
@@ -599,6 +626,15 @@ fun VpnScreen(
                 }
             }
 
+            // Live Path Quick Bar
+            Spacer(Modifier.size(8.dp))
+            LivePathButton(
+                vpnStats = vpnStats,
+                lang = lang,
+                onClick = { showLivePathDialog = true },
+                modifier = Modifier.fillMaxWidth()
+            )
+
             // Live Geo & IP Leak Status Display
             if (checkingGeo) {
                 Spacer(Modifier.size(4.dp))
@@ -642,7 +678,7 @@ fun VpnScreen(
                 "wireguard" -> {
                     SectionLabel(s.transportWireguard)
                     CyberCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(4.dp)) {
+                        Column(Modifier.padding(10.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Bolt, null, tint = Accent, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.size(6.dp))
@@ -663,39 +699,115 @@ fun VpnScreen(
                 "masque" -> {
                     SectionLabel(s.transportMasque)
                     CyberCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Row(
                                 Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(s.transportMasqueDesc, color = TextPrimaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 12.sp)
-                                    Text("CONNECT-IP censorship bypass", color = TextSecondaryC, fontFamily = ShareTechMono, fontSize = 10.sp)
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Box(
-                                        Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(if (masqueTransport == "h3") AccentMuted else SurfaceC)
-                                            .border(0.5.dp, if (masqueTransport == "h3") AccentBorder else BorderC, RoundedCornerShape(4.dp))
-                                            .clickable { vm.setMasqueTransport("h3") }
-                                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("H3 (QUIC)", color = if (masqueTransport == "h3") Accent else TextMutedC, fontFamily = ShareTechMono, fontSize = 10.sp)
-                                    }
-                                    Box(
-                                        Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(if (masqueTransport == "h2") AccentMuted else SurfaceC)
-                                            .border(0.5.dp, if (masqueTransport == "h2") AccentBorder else BorderC, RoundedCornerShape(4.dp))
-                                            .clickable { vm.setMasqueTransport("h2") }
-                                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("H2 (TCP)", color = if (masqueTransport == "h2") Accent else TextMutedC, fontFamily = ShareTechMono, fontSize = 10.sp)
-                                    }
+                                Icon(Icons.Filled.Hub, null, tint = Accent, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        s.transportMasque,
+                                        color = TextPrimaryC,
+                                        fontFamily = displayFamily(lang),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    Text(
+                                        "CONNECT-IP (HTTP/3 & HTTP/2)",
+                                        color = TextSecondaryC,
+                                        fontFamily = ShareTechMono,
+                                        fontSize = 10.sp,
+                                    )
                                 }
                             }
+                            Text(
+                                if (fa) "تونل پرسرعت MASQUE بر پایه پروتکل QUIC/HTTP-3 با امکان جابجایی به حالت TCP/HTTP-2 جهت عبور از فیلترینگ شدید UDP."
+                                else "High-speed MASQUE CONNECT-IP tunnel over QUIC with seamless HTTP/2 TCP fallback for strict UDP-censored networks.",
+                                color = TextMutedC,
+                                fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp,
+                            )
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                val isH3 = masqueTransport == "h3"
+                                Box(
+                                    Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isH3) AccentMuted else SurfaceC)
+                                        .border(0.5.dp, if (isH3) AccentBorder else BorderC, RoundedCornerShape(6.dp))
+                                        .clickable { vm.setMasqueTransport("h3") }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        "HTTP/3 (QUIC)",
+                                        color = if (isH3) Accent else TextSecondaryC,
+                                        fontFamily = ShareTechMono,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isH3) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                }
+                                val isH2 = masqueTransport == "h2"
+                                Box(
+                                    Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isH2) AccentMuted else SurfaceC)
+                                        .border(0.5.dp, if (isH2) AccentBorder else BorderC, RoundedCornerShape(6.dp))
+                                        .clickable { vm.setMasqueTransport("h2") }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        "HTTP/2 (TCP)",
+                                        color = if (isH2) Accent else TextSecondaryC,
+                                        fontFamily = ShareTechMono,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isH2) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                "wom" -> {
+                    SectionLabel(s.transportWom)
+                    CyberCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Bolt, null, tint = Accent, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        s.transportWom,
+                                        color = TextPrimaryC,
+                                        fontFamily = displayFamily(lang),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    Text(
+                                        "WireGuard over MASQUE H2/TCP",
+                                        color = TextSecondaryC,
+                                        fontFamily = ShareTechMono,
+                                        fontSize = 10.sp,
+                                    )
+                                }
+                            }
+                            Text(
+                                if (fa) "تونل وایرگاردِ WARP درون یک جریان TCP/H2 از پروتکل MASQUE حمل می‌شود تا از مسدودسازی و افت بسته‌های UDP جلوگیری کند."
+                                else "Carries WARP WireGuard inside outer MASQUE HTTP/2 TCP stream to bypass UDP filtering and packet drops.",
+                                color = TextMutedC,
+                                fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp,
+                            )
                         }
                     }
                 }
@@ -703,7 +815,7 @@ fun VpnScreen(
                 "gool" -> {
                     SectionLabel(s.transportGool)
                     CyberCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Shield, null, tint = Accent, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.size(6.dp))
@@ -733,10 +845,64 @@ fun VpnScreen(
                     }
                 }
 
+                "pow" -> {
+                    SectionLabel(s.transportPow)
+                    CyberCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(s.transportPow, color = Accent, fontFamily = displayFamily(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    Spacer(Modifier.size(2.dp))
+                                    Text(s.transportPowDesc, color = TextSecondaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 10.sp)
+                                }
+                                Pill("ACTIVE")
+                            }
+                            HorizontalDivider(color = BorderC, thickness = 0.5.dp)
+                            // Outer transport ladder selector
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(s.outerTransport, color = TextPrimaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 11.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    listOf("auto" to "Auto", "masque" to "MASQUE", "wom" to "WOM", "wireguard" to "WG", "gool" to "WoW").forEach { (mode, label) ->
+                                        val isCur = chainOuterMode == mode
+                                        Box(
+                                            Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(if (isCur) AccentMuted else SurfaceC)
+                                                .border(0.5.dp, if (isCur) AccentBorder else BorderC, RoundedCornerShape(4.dp))
+                                                .clickable { vm.setChainOuterMode(mode) }
+                                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                                        ) {
+                                            Text(label, color = if (isCur) Accent else TextMutedC, fontFamily = ShareTechMono, fontSize = 9.sp)
+                                        }
+                                    }
+                                }
+                            }
+                            HorizontalDivider(color = BorderC, thickness = 0.5.dp)
+                            // Egress region
+                            Row(
+                                Modifier.fillMaxWidth().clickable { showPsiphonCountryDialog = true },
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Column {
+                                    Text(s.exitCountry, color = TextPrimaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 11.sp)
+                                    val regionName = if (psiphonRegion == "auto") s.autoCountry else PsiphonRegions.label(psiphonRegion)
+                                    Text(regionName, color = BlueC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Pill(if (psiphonRegion == "auto") "AUTO" else psiphonRegion)
+                            }
+                        }
+                    }
+                }
+
                 "psiphon" -> {
                     SectionLabel(s.transportPsiphon)
                     CyberCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             // Chained toggle
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
@@ -757,7 +923,7 @@ fun VpnScreen(
                                 ) {
                                     Text(s.outerTransport, color = TextPrimaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 11.sp)
                                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        listOf("auto" to "Auto", "masque" to "MASQUE", "wireguard" to "WG", "gool" to "WoW").forEach { (mode, label) ->
+                                        listOf("auto" to "Auto", "masque" to "MASQUE", "wom" to "WOM", "wireguard" to "WG", "gool" to "WoW").forEach { (mode, label) ->
                                             val isCur = chainOuterMode == mode
                                             Box(
                                                 Modifier
@@ -797,7 +963,7 @@ fun VpnScreen(
                 "tor" -> {
                     SectionLabel(s.transportTor)
                     CyberCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             // Chained toggle
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
@@ -863,7 +1029,7 @@ fun VpnScreen(
                 "shard" -> {
                     SectionLabel(s.transportShard)
                     CyberCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(4.dp)) {
+                        Column(Modifier.padding(10.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Hub, null, tint = Accent, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.size(6.dp))
@@ -939,7 +1105,7 @@ fun VpnScreen(
                         Spacer(Modifier.size(2.dp))
                         SectionLabel(s.cleanIpOption)
                         CyberCard(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(4.dp)) {
+                            Column(Modifier.padding(10.dp)) {
                                 Text(
                                     s.cleanIpOptionDesc,
                                     color = TextSecondaryC,
@@ -981,6 +1147,160 @@ fun VpnScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // ---- TLS Handshake Fragmentation & ECH Card (MASQUE & WOM) ----
+            if (selectedTransport in listOf("masque", "wom")) {
+                SectionLabel(s.tlsHandshakeFragment)
+                CyberCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Tune, null, tint = BlueC, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    s.tlsHandshakeFragment,
+                                    color = TextPrimaryC,
+                                    fontFamily = displayFamily(lang),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    if (fa) "تکه‌تکه‌کردن پیام آغاز اتصال برای دور زدن فیلترینگ SNI"
+                                    else "Splits ClientHello packet into fragments to bypass SNI inspection",
+                                    color = TextMutedC,
+                                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                    fontSize = 10.sp,
+                                )
+                            }
+                        }
+
+                        // Presets row: Dedicated row with equal weights, ensuring NO line breaks!
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            listOf(
+                                TlsFragmentMode.AUTOMATIC to s.tlsPresetAuto,
+                                TlsFragmentMode.RECORDS to s.tlsPresetRecords,
+                                TlsFragmentMode.COMPACT to s.tlsPresetCompact,
+                                TlsFragmentMode.CUSTOM to s.tlsPresetCustom,
+                            ).forEach { (mode, label) ->
+                                val isCur = tlsOptions.fragmentMode == mode
+                                Box(
+                                    Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isCur) AccentMuted else SurfaceC)
+                                        .border(
+                                            0.5.dp,
+                                            if (isCur) AccentBorder else BorderC,
+                                            RoundedCornerShape(6.dp)
+                                        )
+                                        .clickable { vm.setTlsFragmentMode(mode) }
+                                        .padding(vertical = 7.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        label,
+                                        color = if (isCur) Accent else TextSecondaryC,
+                                        fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                        fontSize = 10.sp,
+                                        fontWeight = if (isCur) FontWeight.Bold else FontWeight.Normal,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+
+                        if (tlsOptions.fragmentMode == TlsFragmentMode.CUSTOM) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(SurfaceC.copy(alpha = 0.5f))
+                                    .border(0.5.dp, BorderC, RoundedCornerShape(6.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    KvInput(
+                                        label = s.tlsFragmentSize,
+                                        value = tlsOptions.fragmentSize,
+                                        onValueChange = { vm.setTlsFragmentSize(it) },
+                                        placeholder = "16-32",
+                                    )
+                                    KvInput(
+                                        label = s.tlsFragmentDelay,
+                                        value = tlsOptions.fragmentDelay,
+                                        onValueChange = { vm.setTlsFragmentDelay(it) },
+                                        placeholder = "0-1",
+                                    )
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(color = BorderC, thickness = 0.5.dp)
+
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    s.tlsSplitSni,
+                                    color = TextPrimaryC,
+                                    fontFamily = displayFamily(lang),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    if (fa) "تقسیم نام سرور بین قطعات"
+                                    else "Split server name across TLS fragments",
+                                    color = TextMutedC,
+                                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                    fontSize = 9.sp,
+                                )
+                            }
+                            CyberToggle(checked = tlsOptions.splitSni, onChange = { vm.setTlsSplitSni(it) })
+                        }
+
+                        HorizontalDivider(color = BorderC, thickness = 0.5.dp)
+
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    s.tlsEncryptedHello,
+                                    color = TextPrimaryC,
+                                    fontFamily = displayFamily(lang),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    if (fa) "رمزگذاری نام سرور در ClientHello (مخصوص H3)"
+                                    else "Encrypt SNI in ClientHello (HTTP/3 only)",
+                                    color = TextMutedC,
+                                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                    fontSize = 9.sp,
+                                )
+                            }
+                            CyberToggle(checked = tlsOptions.customEch, onChange = { vm.setTlsCustomEch(it) })
+                        }
+
+                        if (tlsOptions.customEch) {
+                            KvInput(
+                                label = s.tlsEchConfigList,
+                                value = tlsOptions.echConfigList,
+                                onValueChange = { vm.setTlsEchConfigList(it) },
+                                placeholder = "Base64 ECHConfigList (not domain)",
+                            )
                         }
                     }
                 }
@@ -1035,7 +1355,7 @@ fun VpnScreen(
             // ---- Tunnel Mode & LAN Sharing ----
             SectionLabel(s.tunnelType)
             CyberCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // Mode selector row
                     Row(
                         Modifier.fillMaxWidth(),
@@ -1139,7 +1459,7 @@ fun VpnScreen(
             // ---- Routing & Security Settings (Smart Split & Kill Switch) ----
             SectionLabel(s.advancedOptions)
             CyberCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // Bypass Iran sites (Smart Split)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -1193,6 +1513,15 @@ fun VpnScreen(
                     HorizontalDivider(color = BorderC, thickness = 0.5.dp)
 
                     // Per-App Routing (Split Tunneling)
+                    val splitSettings = remember { SplitTunnelSettings(context) }
+                    val currentSplitMode = splitSettings.mode()
+                    val currentSplitCount = splitSettings.packages().size
+                    val splitPillText = when (currentSplitMode) {
+                        SplitTunnelSettings.Mode.ALL -> null
+                        SplitTunnelSettings.Mode.INCLUDE -> "$currentSplitCount"
+                        SplitTunnelSettings.Mode.EXCLUDE -> "-$currentSplitCount"
+                    }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1202,6 +1531,10 @@ fun VpnScreen(
                         Column(Modifier.weight(1f)) {
                             Text(s.perAppRouting, color = Accent, fontFamily = displayFamily(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             Text(s.perAppRoutingDesc, color = TextSecondaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 10.sp)
+                        }
+                        if (splitPillText != null) {
+                            Pill(splitPillText)
+                            Spacer(Modifier.width(8.dp))
                         }
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = Accent, modifier = Modifier.size(16.dp))
                     }
@@ -1236,6 +1569,54 @@ fun VpnScreen(
                             Text(s.speedTestSubtitle, color = TextSecondaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 10.sp)
                         }
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = Accent, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+
+            // ---- Network Guard & Privacy Shields ----
+            SectionLabel(s.networkGuard)
+            CyberCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // QUIC / UDP Blocker
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(s.quicBlocker, color = Accent, fontFamily = displayFamily(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(s.quicBlockerDesc, color = TextSecondaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 10.sp)
+                        }
+                        CyberToggle(checked = quicBlock, onChange = { vm.setGuardQuicBlock(it) })
+                    }
+
+                    HorizontalDivider(color = BorderC, thickness = 0.5.dp)
+
+                    // WebRTC Leak Protection
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(s.webrtcBlocker, color = Accent, fontFamily = displayFamily(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(s.webrtcBlockerDesc, color = TextSecondaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 10.sp)
+                        }
+                        CyberToggle(checked = webRtcBlock, onChange = { vm.setGuardWebRtcBlock(it) })
+                    }
+
+                    HorizontalDivider(color = BorderC, thickness = 0.5.dp)
+
+                    // IPv6 Leak Shield
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(s.ipv6Blocker, color = Accent, fontFamily = displayFamily(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(s.ipv6BlockerDesc, color = TextSecondaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 10.sp)
+                        }
+                        CyberToggle(checked = ipv6Block, onChange = { vm.setGuardIpv6Block(it) })
+                    }
+
+                    HorizontalDivider(color = BorderC, thickness = 0.5.dp)
+
+                    // DNS Tracker Sinkhole
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(s.dnsSinkhole, color = Accent, fontFamily = displayFamily(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(s.dnsSinkholeDesc, color = TextSecondaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 10.sp)
+                        }
+                        CyberToggle(checked = dnsSinkhole, onChange = { vm.setGuardDnsSinkhole(it) })
                     }
                 }
             }
@@ -1367,6 +1748,17 @@ fun VpnScreen(
                 onDismiss = { showTorCountryDialog = false }
             )
         }
+
+        // Live Path Dialog
+        val cleanCandidate = manualEndpoint.takeIf { it.isNotBlank() }
+            ?: bestScannedIps.firstOrNull()?.ip
+        LivePathDialog(
+            visible = showLivePathDialog,
+            vpnStats = vpnStats,
+            lang = lang,
+            cleanIp = cleanCandidate,
+            onDismissRequest = { showLivePathDialog = false },
+        )
     }
 }
 
@@ -1545,6 +1937,280 @@ private fun VpnPowerButton(
                 tint = primaryColor,
                 modifier = Modifier.size(42.dp),
             )
+        }
+    }
+}
+
+private data class StepDisplayRow(
+    val title: String,
+    val detail: String,
+    val state: StepState,
+    val repeats: Int = 1,
+)
+
+private fun mapStepToCopy(raw: String, s: AppStrings, fa: Boolean): Pair<String, String> {
+    val text = raw.trim()
+    if (text.startsWith("Scan ") && !text.startsWith("Scan finished")) {
+        val parts = text.removePrefix("Scan ").split(' ')
+        val address = parts.firstOrNull().orEmpty()
+        val reason = parts.getOrNull(1).orEmpty()
+        val title = when (reason) {
+            "trying" -> s.scanningAddress
+            "400" -> s.rejectedNotMasque
+            "access-denied" -> s.rejectedCertRefused
+            "certificate" -> s.rejectedCertUnknown
+            "timeout" -> s.rejectedTimeout
+            "reset" -> s.rejectedReset
+            "eof" -> s.rejectedEof
+            else -> s.rejectedGeneral
+        }
+        return title to address
+    }
+
+    return when {
+        text.startsWith("Trying saved clean address") -> {
+            s.tryingSavedAddress to text.substringAfterLast(" ").trimEnd('.')
+        }
+        text.startsWith("Saved clean address accepted") -> {
+            s.savedAddressAnswered to text.substringAfterLast(" ").trimEnd('.')
+        }
+        text.startsWith("Saved clean HTTP/2 address") -> {
+            s.newCleanAddressSaved to text.substringAfterLast(" ").trimEnd('.')
+        }
+        text.startsWith("Key ") || text.startsWith("Key:") -> {
+            val raw = text.removePrefix("Key:").removePrefix("Key ").trim()
+            when {
+                raw.contains("handshake failed") -> {
+                    val addr = raw.substringBefore(" ").trim()
+                    (if (fa) "تلاش ناموفق کلید" else "Key edge failed") to addr
+                }
+                raw.contains("handshake ready") -> {
+                    val addr = raw.substringBefore(" ").trim()
+                    (if (fa) "تأیید سرور کلید" else "Key edge verified") to addr
+                }
+                raw.contains("trying ") -> {
+                    val addr = raw.substringAfter("trying ").substringBefore(" ").trim()
+                    (if (fa) "بررسی سرور کلید" else "Probing key edge") to addr
+                }
+                raw.contains("acquired") || raw.contains("via ") || raw.contains("ready") -> {
+                    val route = text.substringAfter(" via ", "").substringBefore(" ").trim().trimEnd(')')
+                    val label = if (route.isNotBlank()) route.uppercase() else raw.take(30)
+                    s.keySaved to label
+                }
+                else -> {
+                    val label = raw.take(30)
+                    s.keySaved to label
+                }
+            }
+        }
+        text.startsWith("Starting Psiphon through") -> {
+            val outer = text.removePrefix("Starting Psiphon through ").trim().trimEnd('…', '.')
+            s.startingSecureTunnel to "Psiphon · $outer"
+        }
+        text.startsWith("Starting Psiphon") -> {
+            s.startingSecureTunnel to "Psiphon"
+        }
+        text.startsWith("Creating device") -> {
+            s.creatingDeviceVpn to ""
+        }
+        text.startsWith("Routing device") -> {
+            s.routingDeviceTraffic to ""
+        }
+        text.startsWith("Asha PoW ready") || text.startsWith("Connection established") -> {
+            s.connectionEstablished to ""
+        }
+        text.startsWith("Connecting ") -> {
+            (if (fa) "اتصال به لایه " else "Connecting ") + text.removePrefix("Connecting ").trim().trimEnd('…') to ""
+        }
+        else -> text to ""
+    }
+}
+
+private fun foldSteps(steps: List<ConnectionStep>, s: AppStrings, fa: Boolean): List<StepDisplayRow> {
+    val rows = mutableListOf<StepDisplayRow>()
+    for (step in steps) {
+        val (title, detail) = mapStepToCopy(step.text, s, fa)
+        val last = rows.lastOrNull()
+        if (last != null && last.title == title && last.detail == detail) {
+            rows[rows.lastIndex] = last.copy(state = step.state, repeats = last.repeats + 1)
+        } else {
+            rows += StepDisplayRow(title = title, detail = detail, state = step.state)
+        }
+    }
+    return rows
+}
+
+@Composable
+fun ConnectionStepsCard(
+    s: AppStrings,
+    lang: Lang,
+    vpnStatus: VpnStatus,
+    modifier: Modifier = Modifier,
+) {
+    val fa = lang == Lang.FA
+    val stepsStatus by ConnectionStepsStore.status.collectAsState()
+    val isVisible = vpnStatus == VpnStatus.CONNECTING ||
+        vpnStatus == VpnStatus.ERROR ||
+        stepsStatus.steps.isNotEmpty()
+
+    if (!isVisible) return
+
+    val rows = remember(stepsStatus.steps, fa) {
+        foldSteps(stepsStatus.steps, s, fa)
+    }
+
+    val scrollState = rememberScrollState()
+    LaunchedEffect(rows.size, rows.lastOrNull()?.repeats) {
+        scrollState.animateScrollTo(scrollState.maxValue)
+    }
+
+    CompositionLocalProvider(
+        LocalLayoutDirection provides if (fa) LayoutDirection.Rtl else LayoutDirection.Ltr
+    ) {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(SurfaceC)
+                .border(0.5.dp, BorderC, RoundedCornerShape(8.dp))
+                .padding(14.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.List,
+                            contentDescription = null,
+                            tint = Accent,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            text = s.connectionSteps,
+                            color = TextPrimaryC,
+                            fontFamily = displayFamily(lang),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+
+                    if (vpnStatus == VpnStatus.CONNECTING) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            CircularProgressIndicator(
+                                color = Accent,
+                                strokeWidth = 1.5.dp,
+                                modifier = Modifier.size(10.dp),
+                            )
+                            Text(
+                                text = (stepsStatus.outerLabel.ifBlank { "PoW" }).uppercase(),
+                                color = Accent,
+                                fontFamily = ShareTechMono,
+                                fontSize = 9.sp,
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = BorderC, thickness = 0.5.dp)
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 190.dp)
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    rows.forEach { row ->
+                        ConnectionStepRow(row, fa, lang)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionStepRow(row: StepDisplayRow, fa: Boolean, lang: Lang) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .size(16.dp)
+                .clip(CircleShape)
+                .background(
+                    when (row.state) {
+                        StepState.DONE -> Accent.copy(alpha = 0.12f)
+                        StepState.FAILED -> RedC.copy(alpha = 0.12f)
+                        StepState.RUNNING -> Color.Transparent
+                    }
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            when (row.state) {
+                StepState.DONE -> Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = Accent,
+                    modifier = Modifier.size(11.dp),
+                )
+                StepState.FAILED -> Icon(
+                    Icons.Default.Close,
+                    contentDescription = null,
+                    tint = RedC,
+                    modifier = Modifier.size(11.dp),
+                )
+                StepState.RUNNING -> CircularProgressIndicator(
+                    color = Accent,
+                    trackColor = AccentMuted,
+                    strokeWidth = 1.5.dp,
+                    modifier = Modifier.size(11.dp),
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            val titleText = if (row.repeats > 1) {
+                "${row.title} ×${row.repeats}"
+            } else {
+                row.title
+            }
+            Text(
+                text = titleText.localizeDigits(lang),
+                color = when (row.state) {
+                    StepState.DONE -> TextPrimaryC
+                    StepState.FAILED -> TextSecondaryC
+                    StepState.RUNNING -> Accent
+                },
+                fontFamily = displayFamily(lang),
+                fontSize = 11.sp,
+                fontWeight = if (row.state == StepState.RUNNING) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 2,
+            )
+            if (row.detail.isNotBlank()) {
+                Text(
+                    text = row.detail,
+                    color = if (row.state == StepState.FAILED) RedC.copy(alpha = 0.8f) else TextMutedC,
+                    fontFamily = ShareTechMono,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }

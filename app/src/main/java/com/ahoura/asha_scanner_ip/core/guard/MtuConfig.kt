@@ -17,6 +17,7 @@ object MtuConfig {
     const val MIN_MTU = 68
     const val MAX_MTU = 1500
 
+    const val KEY_WOM = "mtu_wom"
     const val KEY_MASQUE = "mtu_masque"
     const val KEY_WIREGUARD = "mtu_wireguard"
     const val KEY_WOW = "mtu_wow"
@@ -24,6 +25,7 @@ object MtuConfig {
     const val KEY_TOR = "mtu_tor"
     const val KEY_SHARD = "mtu_shard"
 
+    const val DEFAULT_WOM = 1280
     const val DEFAULT_MASQUE = 1304
     const val DEFAULT_WIREGUARD = 1440
     const val DEFAULT_WOW = 1280
@@ -36,6 +38,7 @@ object MtuConfig {
         val default: Int,
         val title: String,
     ) {
+        WOM(KEY_WOM, DEFAULT_WOM, "WOM"),
         MASQUE(KEY_MASQUE, DEFAULT_MASQUE, "MASQUE"),
         WIREGUARD(KEY_WIREGUARD, DEFAULT_WIREGUARD, "WireGuard"),
         WOW(KEY_WOW, DEFAULT_WOW, "WOW"),
@@ -78,6 +81,7 @@ object MtuConfig {
     }
 
     fun forWarpProtocol(context: Context, protocolUpper: String): Int = when {
+        protocolUpper.contains("WOM") -> get(context, Method.WOM)
         protocolUpper.contains("MASQUE") || protocolUpper.contains("MIM") -> get(context, Method.MASQUE)
         protocolUpper.contains("WIREGUARD") -> get(context, Method.WIREGUARD)
         protocolUpper.contains("GOOL") || protocolUpper.contains("WOW") -> get(context, Method.WOW)

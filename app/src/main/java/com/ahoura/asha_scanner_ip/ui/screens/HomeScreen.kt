@@ -50,6 +50,7 @@ import com.ahoura.asha_scanner_ip.ui.components.TypewriterText
 import com.ahoura.asha_scanner_ip.ui.i18n.Lang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
+import com.ahoura.asha_scanner_ip.ui.i18n.localizeDigits
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
 import com.ahoura.asha_scanner_ip.ui.theme.AccentDim
 import com.ahoura.asha_scanner_ip.ui.theme.BlueC
@@ -115,6 +116,84 @@ fun HomeScreen(
         StaggerIn(0) { Pill("v${BuildConfig.VERSION_NAME} · IR-OPTIMIZED") }
 
         Spacer(Modifier.size(20.dp))
+
+        // ---- Resume scan banner if snapshot exists ----
+        if (state.resumeSnapshot != null) {
+            val snap = state.resumeSnapshot!!
+            val bannerText = s.resumeScanBanner
+                .replace("{0}", snap.testedCount.toString().localizeDigits(lang))
+                .replace("{1}", snap.totalCount.toString().localizeDigits(lang))
+                .replace("{2}", snap.healthyResults.size.toString().localizeDigits(lang))
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Accent.copy(alpha = 0.08f))
+                    .border(1.dp, Accent.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .background(Accent, RoundedCornerShape(2.dp))
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Text(
+                            text = bannerText,
+                            color = Color.White,
+                            fontFamily = if (lang == Lang.FA) Vazirmatn else monoFamily(lang),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Spacer(Modifier.size(10.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Accent)
+                                .clickable {
+                                    vm.resumeScan()
+                                    onQuick()
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = s.resumeScanBtn.uppercase(),
+                                color = Color.Black,
+                                fontFamily = monoFamily(lang),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .border(0.5.dp, TextMutedC, RoundedCornerShape(4.dp))
+                                .clickable { vm.discardResume() }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = s.discardResumeBtn,
+                                color = TextMutedC,
+                                fontFamily = monoFamily(lang),
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.size(12.dp))
+        }
 
         // ---- Menu ----
         StaggerIn(1) { MenuItemCard(Icons.Filled.Bolt, Accent, s.vpnMode, s.vpnModeDesc, active = true, onClick = onVpn) }

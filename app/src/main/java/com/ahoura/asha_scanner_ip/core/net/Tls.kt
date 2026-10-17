@@ -66,17 +66,36 @@ object Tls {
         alpn: List<String>,
         insecure: Boolean,
         handshakeTimeoutMs: Int,
+        antiDpi: com.ahoura.asha_scanner_ip.core.model.AntiDpiConfig? = null,
     ): SSLSocket {
+        val targetSocket = if (antiDpi != null && antiDpi.enabled) {
+            AntiDpiSocket(plain, antiDpi)
+        } else {
+            plain
+        }
         val ctx = if (insecure) insecureContext else secureContext
-        val ssl = ctx.socketFactory.createSocket(plain, ip, port, true) as SSLSocket
+        val ssl = ctx.socketFactory.createSocket(targetSocket, ip, port, true) as SSLSocket
         ssl.soTimeout = handshakeTimeoutMs
         ssl.useClientMode = true
         val params = ssl.sslParameters
         if (sni.isNotBlank() && !isIpLiteral(sni)) {
             params.serverNames = listOf(SNIHostName(sni))
         }
-        if (alpn.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            params.applicationProtocols = alpn.toTypedArray()
+        val effectiveAlpn = if (antiDpi != null && antiDpi.enabled && antiDpi.alpn.isNotBlank()) {
+            listOf(antiDpi.alpn)
+        } else {
+            alpn
+        }
+        if (effectiveAlpn.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            params.applicationProtocols = effectiveAlpn.toTypedArray()
+        }
+        if (antiDpi != null && antiDpi.enabled && antiDpi.cipherSuites.isNotBlank()) {
+            val desired = antiDpi.cipherSuites.split(":", ",").map { it.trim() }.filter { it.isNotEmpty() }
+            val supported = ssl.supportedCipherSuites.toSet()
+            val matched = desired.filter { supported.contains(it) }
+            if (matched.isNotEmpty()) {
+                params.cipherSuites = matched.toTypedArray()
+            }
         }
         ssl.sslParameters = params
         ssl.startHandshake()

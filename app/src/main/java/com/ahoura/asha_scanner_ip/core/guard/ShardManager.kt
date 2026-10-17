@@ -148,6 +148,7 @@ object ShardManager {
         builder.environment()["HOME"] = context.filesDir.absolutePath
         // xray writes its asset lookups relative to this; pointing it at our own
         // private dir keeps it from probing /sdcard paths it cannot read.
+        builder.environment()["xray.location.asset"] = configFile.parent
         builder.environment()["XRAY_LOCATION_ASSET"] = configFile.parent
 
         val started = try {

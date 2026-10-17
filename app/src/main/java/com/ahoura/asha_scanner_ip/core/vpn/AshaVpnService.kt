@@ -14,6 +14,7 @@ import com.ahoura.asha_scanner_ip.data.SettingsStore
 import com.ahoura.asha_scanner_ip.core.guard.CoreConfig
 import com.ahoura.asha_scanner_ip.core.guard.GuardVpnService
 import com.ahoura.asha_scanner_ip.core.guard.MtuConfig
+import com.ahoura.asha_scanner_ip.core.guard.SplitTunnelSettings
 import com.ahoura.asha_scanner_ip.core.guard.TorManager
 import com.ahoura.asha_scanner_ip.core.guard.Tun2SocksManager
 import kotlinx.coroutines.CoroutineScope
@@ -77,15 +78,23 @@ class AshaVpnService : GuardVpnService() {
                             prefs.edit().putString("clean_ip", cleanIp.trim()).apply()
                         }
 
+                        val isPow = transport == "pow"
                         val armed = if (explicitChained != null) {
-                            if (transport == "psiphon") prefs.edit().putBoolean("chain_armed", explicitChained).apply()
+                            if (transport == "psiphon" || isPow) prefs.edit().putBoolean("chain_armed", explicitChained).apply()
                             if (transport == "tor") prefs.edit().putBoolean("tor_chain_armed", explicitChained).apply()
                             explicitChained
                         } else {
-                            if (transport == "tor") TorManager.chainArmed(this) else prefs.getBoolean("chain_armed", false)
+                            if (isPow) {
+                                prefs.edit().putBoolean("chain_armed", true).apply()
+                                true
+                            } else if (transport == "tor") {
+                                TorManager.chainArmed(this)
+                            } else {
+                                prefs.getBoolean("chain_armed", false)
+                            }
                         }
 
-                        val effectiveProto = if (transport == "psiphon" && armed) {
+                        val effectiveProto = if (isPow || (transport == "psiphon" && armed)) {
                             GuardVpnService.CHAIN_PROTOCOL_MARKER.lowercase()
                         } else {
                             transport
@@ -116,21 +125,25 @@ class AshaVpnService : GuardVpnService() {
                         val manualEndpoint = prefs.getString("manual_endpoint", null)?.trim().orEmpty()
                         val storedCleanIp = prefs.getString("clean_ip", null)?.trim().orEmpty()
                         val rawCleanIp = manualEndpoint.takeIf { it.isNotBlank() }
-                            ?: cleanIp?.trim()?.takeIf { it.isNotBlank() && CoreConfig.isWarpEndpoint(it) }
-                            ?: storedCleanIp.takeIf { it.isNotBlank() && CoreConfig.isWarpEndpoint(it) }
+                            ?: cleanIp?.trim()?.takeIf { it.isNotBlank() }
+                            ?: storedCleanIp.takeIf { it.isNotBlank() }
 
                         val masquePeer = if (rawCleanIp != null) CoreConfig.formatPeerForProtocol(rawCleanIp, "masque") else null
                         val wgPeer = if (rawCleanIp != null) CoreConfig.formatPeerForProtocol(rawCleanIp, "wireguard") else null
-                        val chosenEnrollIp = if (effectiveProto.lowercase() in listOf("masque", "mim")) masquePeer else wgPeer
+                        val chosenEnrollIp = if (effectiveProto.lowercase() in listOf("masque", "mim", "wom", "wg-over-masque")) masquePeer else wgPeer
+
+                        if (masquePeer != null) {
+                            CoreConfig.syncCleanH2Peers(this, listOf(masquePeer))
+                        }
 
                         val enrollHost = if (manualEndpoint.isNotBlank()) {
-                            manualEndpoint.substringBefore(":")
+                            manualEndpoint.removeSurrounding("[", "]").substringBefore(":")
                         } else if (rawCleanIp != null) {
-                            rawCleanIp.substringBefore(":")
+                            rawCleanIp.removeSurrounding("[", "]").substringBefore(":")
                         } else {
                             "162.159.192.1"
                         }
-                        val enrollAddress = "$enrollHost:443"
+                        val enrollAddress = if (enrollHost.contains(":")) "[$enrollHost]:443" else "$enrollHost:443"
                         runCatching { android.system.Os.setenv("AETHER_ENROLL_ADDRESS", enrollAddress, true) }
 
                         val echEnabled = prefs.getBoolean("ech_enabled", false)
@@ -144,12 +157,12 @@ class AshaVpnService : GuardVpnService() {
                             (transport == "tor" && TorManager.chainArmed(this)) ||
                             effectiveProto.contains("chain") ||
                             effectiveProto.contains("psiphon-over-warp")
-                        val isOuterWarp = effectiveProto.lowercase() in listOf("masque", "mim", "gool", "warp-in-warp") || isChained
+                        val isOuterWarp = effectiveProto.lowercase() in listOf("masque", "mim", "gool", "warp-in-warp", "wom", "wg-over-masque") || isChained
 
                         if (isOuterWarp) {
                             runCatching {
                                 val masqueTransport = prefs.getString("default_masque_transport", "h3")?.lowercase() ?: "h3"
-                                if (masqueTransport == "h2" || isChained) {
+                                if (masqueTransport == "h2" || isChained || effectiveProto.lowercase() in listOf("wom", "wg-over-masque")) {
                                     android.system.Os.setenv("AETHER_MASQUE_HTTP2", "1", true)
                                 } else {
                                     android.system.Os.unsetenv("AETHER_MASQUE_HTTP2")
@@ -159,6 +172,11 @@ class AshaVpnService : GuardVpnService() {
                                 android.system.Os.setenv("AETHER_MASQUE_STARTUP_SECS", "35", true)
                                 android.system.Os.setenv("AETHER_MASQUE_VALIDATE_SECS", "15", true)
                                 android.system.Os.setenv("AETHER_WG_VALIDATE_SECS", "15", true)
+                                android.system.Os.setenv("AETHER_API_CAMO", "1", true)
+                                android.system.Os.setenv("AETHER_MASQUE_H2_LARGE_WINDOWS", "1", true)
+                                android.system.Os.setenv("AETHER_MASQUE_H2_SOCKET_TUNING", "1", true)
+                                android.system.Os.setenv("AETHER_MASQUE_H2_SPEED_PICK", "1", true)
+                                android.system.Os.setenv("AETHER_QUIC_TUNED", "1", true)
                                 if (masquePeer != null || wgPeer != null) {
                                     if (masquePeer != null) {
                                         android.system.Os.setenv("AETHER_MASQUE_H2_PEER", masquePeer, true)
@@ -192,6 +210,13 @@ class AshaVpnService : GuardVpnService() {
                                 android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER")
                                 android.system.Os.unsetenv("AETHER_WG_PEER")
                                 android.system.Os.unsetenv("AETHER_PEER")
+                            }
+                        }
+                        if (MtuConfig.isCustom(this, MtuConfig.Method.WOM)) {
+                            val mtu = MtuConfig.get(this, MtuConfig.Method.WOM).toString()
+                            runCatching {
+                                android.system.Os.setenv("AETHER_WOM_MTU", mtu, true)
+                                android.system.Os.setenv("AETHER_MASQUE_MTU", mtu, true)
                             }
                         }
                         if (MtuConfig.isCustom(this, MtuConfig.Method.MASQUE)) {
@@ -386,13 +411,26 @@ class AshaVpnService : GuardVpnService() {
                 builder.addDnsServer("8.8.8.8")
                 builder.addRoute("0.0.0.0", 0)
                 builder.setBlocking(false)
-                runCatching { builder.addDisallowedApplication(packageName) }
+                SplitTunnelSettings(this@AshaVpnService).applyTo(builder, this@AshaVpnService)
 
                 val pfd = builder.establish() ?: throw IllegalStateException("VPN Builder.establish() returned null")
                 customVpnInterface = pfd
 
+                val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+                val quicBlock = prefs.getBoolean("guard_quic_block", true)
+                val webRtcBlock = prefs.getBoolean("guard_webrtc_block", true)
+                val ipv6Block = prefs.getBoolean("guard_ipv6_block", true)
+                val dnsSinkhole = prefs.getBoolean("guard_dns_sinkhole", true)
+                com.ahoura.asha_scanner_ip.core.guard.TunPacketFilter.applyFlags(
+                    sinkhole = dnsSinkhole,
+                    webRtc = webRtcBlock,
+                    quic = quicBlock,
+                    ipv6 = ipv6Block,
+                )
+                val filteredPfd = com.ahoura.asha_scanner_ip.core.guard.TunPacketFilter.attach(pfd, 1500)
+
                 // Bridge TUN to SOCKS5 via badvpn tun2socks
-                val bridged = Tun2SocksManager.start(pfd, socksPort)
+                val bridged = Tun2SocksManager.start(filteredPfd, socksPort)
                 if (!bridged) {
                     throw IllegalStateException("Failed to bridge TUN to SOCKS5 via tun2socks")
                 }
@@ -472,6 +510,7 @@ class AshaVpnService : GuardVpnService() {
         customTimerJob = null
         customPingJob = null
 
+        com.ahoura.asha_scanner_ip.core.guard.TunPacketFilter.stop()
         Tun2SocksManager.stop()
         XrayProcessManager.stop()
         runCatching { stormDnsManager.stop() }

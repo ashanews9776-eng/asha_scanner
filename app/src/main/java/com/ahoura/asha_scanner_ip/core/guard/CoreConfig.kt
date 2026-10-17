@@ -93,41 +93,140 @@ object CoreConfig {
         val clean = rawPeer.trim()
         if (clean.isEmpty()) return null
 
-        val isMasque = protocol.lowercase() in listOf("masque", "mim", "chain", "psiphon-over-warp", "tor-over-warp")
+        val isMasque = protocol.lowercase() in listOf(
+            "pow", "masque", "mim", "wom", "chain", "psiphon-over-warp", "tor-over-warp", "wg-over-masque"
+        )
         val defaultPort = if (isMasque) 443 else 2408
 
-        return if (clean.contains(":")) {
-            val host = clean.substringBeforeLast(":")
-            val portStr = clean.substringAfterLast(":")
-            val port = portStr.toIntOrNull()
-            if (isMasque && port == 2408) {
-                "$host:443"
-            } else if (!isMasque && port == 443) {
-                "$host:2408"
-            } else {
-                clean
-            }
+        val host: String
+        val port: Int?
+        val isIpv6: Boolean
+
+        if (clean.startsWith("[") && clean.contains("]:")) {
+            host = clean.substringBeforeLast("]:").removePrefix("[")
+            port = clean.substringAfterLast("]:").toIntOrNull()
+            isIpv6 = true
+        } else if (clean.startsWith("[") && clean.endsWith("]")) {
+            host = clean.removeSurrounding("[", "]")
+            port = null
+            isIpv6 = true
+        } else if (clean.count { it == ':' } >= 2) {
+            // Unbracketed IPv6 without port
+            host = clean
+            port = null
+            isIpv6 = true
+        } else if (clean.contains(":")) {
+            // IPv4 with port
+            host = clean.substringBeforeLast(":")
+            port = clean.substringAfterLast(":").toIntOrNull()
+            isIpv6 = false
         } else {
-            "$clean:$defaultPort"
+            // IPv4 or domain without port
+            host = clean
+            port = null
+            isIpv6 = false
         }
+
+        val targetPort = if (isMasque) {
+            if (port == 2408 || port == null) 443 else port
+        } else {
+            if (port == 443 || port == null) 2408 else port
+        }
+
+        return if (isIpv6) "[$host]:$targetPort" else "$host:$targetPort"
     }
 
     /**
-     * Checks whether an IP or endpoint belongs to known Cloudflare WARP/MASQUE Anycast ranges.
-     * Web CDN IPs (104.16.x.x, 172.67.x.x, etc.) are for website proxying and custom profiles,
-     * NOT native WARP/WireGuard or native MASQUE endpoints.
+     * Checks whether an IP or endpoint belongs to known Cloudflare WARP/MASQUE Anycast ranges
+     * or is a valid IPv4/IPv6 target address.
      */
     fun isWarpEndpoint(raw: String?): Boolean {
         if (raw.isNullOrBlank()) return false
-        val host = raw.trim().substringBeforeLast(':').removeSurrounding("[", "]")
+        val clean = raw.trim()
+        val host = if (clean.startsWith("[") && clean.contains("]:")) {
+            clean.substringBeforeLast("]:").removePrefix("[")
+        } else if (clean.startsWith("[") && clean.endsWith("]")) {
+            clean.removeSurrounding("[", "]")
+        } else if (clean.count { it == ':' } >= 2) {
+            clean
+        } else if (clean.contains(":")) {
+            clean.substringBeforeLast(":")
+        } else {
+            clean
+        }.trim()
+
         val warpPrefixes = listOf(
-            "162.159.192.", "162.159.193.", "162.159.195.", "162.159.197.",
-            "162.159.198.", "162.159.199.", "162.159.200.", "162.159.204.",
-            "188.114.96.", "188.114.97.", "188.114.98.", "188.114.99."
+            "162.159.", "188.114.", "104.16.", "104.17.", "104.18.", "104.19.", "104.20.",
+            "172.64.", "172.65.", "172.66.", "172.67.",
+            "2606:4700:"
         )
         return warpPrefixes.any { host.startsWith(it) } ||
-            host.startsWith("162.159.") ||
-            host.startsWith("188.114.")
+            host.matches(Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$""")) ||
+            host.contains(":")
+    }
+
+    /**
+     * Points to uac-pow-clean-h2.json in filesDir, where native Aether directly looks for
+     * pre-validated clean HTTP/2 endpoints to bypass prober scanning failures.
+     */
+    val DEFAULT_CLEAN_H2_PEERS = listOf(
+        "188.114.97.1:443",
+        "188.114.96.1:443",
+        "162.159.192.1:443",
+        "162.159.193.1:443",
+        "162.159.195.1:443",
+        "172.67.182.1:443",
+        "104.16.132.229:443",
+        "104.17.150.1:443",
+        "104.21.32.1:443",
+    )
+
+    fun ensureCleanH2Peers(context: Context, extraPeers: List<String> = emptyList()) {
+        val existing = cleanH2Peers(context)
+        val savedCleanIp = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .getString("clean_ip", null)?.trim()?.takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
+        val all = (extraPeers + savedCleanIp + existing + DEFAULT_CLEAN_H2_PEERS)
+            .mapNotNull { formatPeerForProtocol(it, "masque") }
+            .distinct()
+        syncCleanH2Peers(context, all)
+    }
+
+    /**
+     * Points to uac-pow-clean-h2.json in filesDir, where native Aether directly looks for
+     * pre-validated clean HTTP/2 endpoints to bypass prober scanning failures.
+     */
+    fun cleanH2File(context: Context): File = File(context.filesDir, "uac-pow-clean-h2.json")
+
+    /**
+     * Synchronizes a list of clean endpoints into uac-pow-clean-h2.json.
+     * When this file exists, Aether dials saved clean peers immediately without running
+     * the native prober against blocked endpoints.
+     */
+    fun syncCleanH2Peers(context: Context, peers: List<String>) {
+        if (peers.isEmpty()) return
+        runCatching {
+            val formattedPeers = peers.mapNotNull { peer ->
+                formatPeerForProtocol(peer, "masque")
+            }.distinct()
+            if (formattedPeers.isNotEmpty()) {
+                val file = cleanH2File(context)
+                val json = JSONObject().apply {
+                    put("peers", org.json.JSONArray(formattedPeers))
+                }
+                file.writeText(json.toString())
+            }
+        }
+    }
+
+    fun cleanH2Peers(context: Context): List<String> {
+        val file = cleanH2File(context)
+        if (!file.isFile) return emptyList()
+        return runCatching {
+            val text = file.readText()
+            val json = JSONObject(text)
+            val arr = json.optJSONArray("peers") ?: return emptyList()
+            (0 until arr.length()).map { arr.getString(it) }
+        }.getOrDefault(emptyList())
     }
 
     fun json(context: Context, protocol: String? = null, cleanIpOverride: String? = null): String =
@@ -161,14 +260,24 @@ object CoreConfig {
         }
 
         return JSONObject().apply {
-            put("config_path", File(context.filesDir, "aether.toml").absolutePath)
+            val powIdentity = File(context.filesDir, "uac-pow.toml")
+            val legacyIdentity = File(context.filesDir, "aether.toml")
+            if (!powIdentity.exists() && legacyIdentity.exists()) {
+                runCatching { legacyIdentity.copyTo(powIdentity, overwrite = false) }
+            }
+            put("config_path", powIdentity.absolutePath)
+            // Identity provisioning through SHARD: when the carrier has blocked
+            // the account API, this points the core's registration at a SOCKS
             // Identity provisioning through SHARD: when the carrier has blocked
             // the account API, this points the core's registration at a SOCKS
             // listener that is already on the open internet, so a fresh install
             // can obtain an identity it could not get from its own link.
             // Set by GuardVpnService for one connect only (see
             // IdentityProvisioner); absent on a normal connect.
-            takeIf { socksProxyForCore.isNotBlank() }?.put("socks_proxy", socksProxyForCore)
+            takeIf { socksProxyForCore.isNotBlank() }?.put(
+                "upstream_proxy",
+                if (socksProxyForCore.startsWith("socks5")) socksProxyForCore else "socks5h://$socksProxyForCore"
+            )
             // Fallback must match MainActivity's `savedProtocol()` and the tile's
             // default. This is the value used before the user has ever picked
             // anything, i.e. on a first connect — and WireGuard now leads the rail,
@@ -212,7 +321,7 @@ object CoreConfig {
             }
             put("scan_mode", text("default_scan_mode", "balanced"))
             put("ip_scan", text("default_scan", "v4"))
-            put("endpoint_cache_path", File(context.filesDir, "masque-gateway-cache.json").absolutePath)
+            put("endpoint_cache_path", File(context.filesDir, "uac-pow-masque-cache.json").absolutePath)
             put("endpoint_discovery", text("endpoint_discovery", "cache"))
             put("masque_transport", text("default_masque_transport", "h3"))
             // A manual peer pins ONE address, and it belongs to whichever transport
@@ -223,10 +332,12 @@ object CoreConfig {
             val manual = text("manual_endpoint").ifBlank { null }
             val clean = cleanIpOverride?.trim()?.takeIf { it.isNotBlank() }
                 ?: text("clean_ip").ifBlank { null }
-            val candidatePeer = manual ?: clean?.takeIf { isWarpEndpoint(it) }
+            val candidatePeer = manual ?: clean?.takeIf { isWarpEndpoint(it) } ?: clean
             val effectivePeer = if (candidatePeer != null) formatPeerForProtocol(candidatePeer, effectiveProtocol) else null
+            if (effectivePeer != null && effectiveProtocol.lowercase() in listOf("wom", "wg-over-masque", "masque", "mim")) {
+                syncCleanH2Peers(context, listOf(effectivePeer))
+            }
             putOpt("forced_peer", effectivePeer)
-            putOpt("forced_inner_peer", text("manual_inner_endpoint").ifBlank { null })
             put("obfuscation_profile", text("obfuscation_profile", "balanced"))
             putOpt("obfuscation_parameters", manualObfuscation.takeIf { it.length() > 0 }?.toString())
             put("retry_obfuscation_profiles", prefs.getBoolean("retry_obfuscation_profiles", true))
@@ -235,7 +346,11 @@ object CoreConfig {
             put("log_level", text("log_level", "info"))
             put("perf_profile", text("perf_profile", "auto"))
             put("h2_fragmentation", text("h2_fragmentation", "on") == "on")
-            put("mixed_case_sni", prefs.getBoolean("mixed_case_sni", false))
+            put("h2_large_windows", true)
+            put("h2_socket_tuning", true)
+            put("h2_speed_pick", true)
+            put("quic_tuned", true)
+            put("api_camo", "auto")
             val customUdp = prefs.getString("dns_servers_udp", null)?.ifBlank { null }
             putOpt("dns_servers", customUdp ?: text("dns_servers").ifBlank { null })
             putOpt("route_block", text("route_block").ifBlank { null })
@@ -254,50 +369,54 @@ object CoreConfig {
     /**
      * Config for the OUTER leg of Psiphon-over-WARP.
      *
-     * Differences from a normal connect, each one load-bearing:
-     *  - `protocol` is a WARP transport, never "psiphon"; the chain's Psiphon half
-     *    is the Go library, not the core.
-     *  - `listen` moves to [CHAIN_SOCKS_PORT] because Psiphon keeps [SOCKS_PORT].
-     *  - no `tun_fd` is passed by the caller (see NativeCore.startProxy), so the
-     *    core runs its userspace netstack and publishes SOCKS instead of taking
-     *    the device TUN — tun2socks owns that, on Psiphon's side.
-     *
-     * @param protocol which WARP transport carries this attempt. The service walks
-     *   [CHAIN_OUTER_LADDER] and calls this once per rung, so the choice belongs to
-     *   the caller rather than to a stored preference.
+     * Only fields present in Rust NativeStartOptions are included to satisfy
+     * serde deny_unknown_fields.
      */
     fun chainOuterJson(context: Context, protocol: String, cleanIpOverride: String? = null): String {
-        val jsonStr = json(context, protocol, listenOverride = CHAIN_SOCKS_PORT, cleanIpOverride = cleanIpOverride)
-        return if (protocol.lowercase() in listOf("masque", "mim")) {
-            runCatching {
-                val obj = JSONObject(jsonStr)
-                obj.put("masque_transport", "h2")
-                obj.toString()
-            }.getOrDefault(jsonStr)
-        } else {
-            jsonStr
+        val mci = AshaCarrier.isMci(context)
+        val proto = if (protocol.lowercase() == "pow") "masque" else protocol.lowercase()
+        if (proto in listOf("masque", "mim")) {
+            ensureCleanH2Peers(context, if (!cleanIpOverride.isNullOrBlank()) listOf(cleanIpOverride) else emptyList())
         }
+        return JSONObject().apply {
+            put("config_path", File(context.filesDir, "uac-pow.toml").absolutePath)
+            put("protocol", proto)
+            put("listen", "127.0.0.1:$CHAIN_SOCKS_PORT")
+            put("scan_mode", "balanced")
+            put("ip_scan", if (mci) "both" else "v4")
+            put("endpoint_cache_path", File(context.filesDir, "uac-pow-masque-cache.json").absolutePath)
+            put("endpoint_discovery", "cache")
+            put("masque_transport", if (proto in listOf("masque", "mim")) "h2" else "h3")
+            put("obfuscation_profile", "balanced")
+            put("retry_obfuscation_profiles", true)
+            put("tls_curve_preset", "chrome")
+            put("wireguard_data_check", true)
+            put("log_level", "info")
+            put("perf_profile", "high")
+            put("h2_fragmentation", if (mci) false else true)
+            put("quic_tuned", true)
+            put("h2_large_windows", true)
+            put("h2_socket_tuning", true)
+            put("h2_speed_pick", true)
+            put("api_camo", "auto")
+            put("gateway", false)
+            if (!cleanIpOverride.isNullOrBlank()) {
+                val peer = formatPeerForProtocol(cleanIpOverride, proto)
+                if (peer != null) {
+                    put("forced_peer", peer)
+                    if (proto in listOf("masque", "mim")) {
+                        syncCleanH2Peers(context, listOf(peer))
+                    }
+                }
+            }
+        }.toString()
     }
 
     /**
      * The outer transports tried, in order, until one carries Psiphon.
-     *
-     * Ordered by measured likelihood of working on an Iranian carrier, cheapest
-     * first:
-     *
-     *  - `masque` leads because it has two transports of its own (HTTP/3 over
-     *    UDP/443, then HTTP/2 over TCP/443 with TLS fragmentation) and a gateway
-     *    cache plus a last-known-good endpoint, so a repeat connect is fast.
-     *  - `wireguard` next: it is blocked outright on some carriers (Hamrah-e-Aval
-     *    has never carried it) but connects immediately on others.
-     *  - `gool` last. It is WARP-on-WARP, so it stacks two tunnels under Psiphon
-     *    for three in total — the slowest rung, and only worth reaching when the
-     *    single-layer ones are blocked.
-     *
-     * The rung that works is remembered per device, so this ordering only decides
-     * the very first attempt.
+     * MASQUE leads because it uses HTTP/2 over TCP/443 with TLS fragmentation.
      */
-    val CHAIN_OUTER_LADDER = listOf("masque", "wireguard", "gool")
+    val CHAIN_OUTER_LADDER = listOf("masque", "gool", "wireguard")
 
     /**
      * Which transport the user pinned for the chain's outer leg, or "auto".
@@ -1007,10 +1126,95 @@ object CoreConfig {
         chainOuterCandidates(context, forTor).size > 1
 
     /** Human-readable name for a rung of [CHAIN_OUTER_LADDER]. */
-    fun chainOuterLabel(protocol: String): String = when (protocol) {
+    fun chainOuterLabel(protocol: String): String = when (protocol.lowercase()) {
         "masque" -> "MASQUE"
+        "wom" -> "WOM (WG/MASQUE)"
         "wireguard" -> "WireGuard"
         "gool" -> "WoW"
         else -> protocol.uppercase()
+    }
+
+    const val TLS_OPTIONS_PREF = "tls_options_json"
+
+    fun getTlsOptions(context: Context): TlsOptions {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val raw = prefs.getString(TLS_OPTIONS_PREF, null)
+        return TlsOptions.decode(raw)
+    }
+
+    fun setTlsOptions(context: Context, options: TlsOptions) {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putString(TLS_OPTIONS_PREF, options.encode()).apply()
+    }
+
+    /**
+     * Builds the JSON configuration accepted by libwhiteaesther_core (BridgeConfig).
+     */
+    fun toBridgeConfig(
+        context: Context,
+        protocol: String,
+        mode: String = "tun", // "tun" or "proxy"
+        cleanIpOverride: String? = null,
+        listenPort: Int = SOCKS_PORT,
+    ): String {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        fun text(key: String, fallback: String = "") =
+            prefs.getString(key, fallback)?.trim().orEmpty()
+
+        val wireTransport = when (protocol.lowercase()) {
+            "wom", "wg-over-masque" -> "wom"
+            "wireguard", "wg" -> "wg"
+            "gool", "wow", "warp-in-warp", "wiw" -> "wiw"
+            "mim", "masque-in-masque" -> "mim"
+            "masque" -> prefs.getString("default_masque_transport", "h3")?.lowercase()?.takeIf { it in setOf("h2", "h3") } ?: "h3"
+            else -> "wom"
+        }
+
+        val manual = text("manual_endpoint").ifBlank { null }
+        val clean = cleanIpOverride?.trim()?.takeIf { it.isNotBlank() }
+            ?: text("clean_ip").ifBlank { null }
+        val candidatePeer = manual ?: clean?.takeIf { isWarpEndpoint(it) } ?: clean
+        val effectivePeer = if (candidatePeer != null) formatPeerForProtocol(candidatePeer, protocol) else null
+
+        if (effectivePeer != null && protocol.lowercase() in listOf("wom", "wg-over-masque", "masque", "mim")) {
+            syncCleanH2Peers(context, listOf(effectivePeer))
+        }
+
+        val tlsOptions = getTlsOptions(context)
+
+        val wireMode = if (mode == "vpn") "tun" else mode
+        val json = JSONObject().apply {
+            put("mode", wireMode)
+            put("configPath", File(context.filesDir, "aether.toml").absolutePath)
+            put("listenPort", listenPort)
+            put("lanSharing", lanSharingEnabled(context) && mode == "proxy")
+            put("lanUsername", "")
+            put("lanPassword", "")
+            put("wgKeepalive", 25)
+            put("upstreamProxy", text("upstream_proxy"))
+            put("dnsServers", prefs.getString("dns_servers_udp", null)?.ifBlank { null } ?: text("dns_servers"))
+            put("routeSniff", true)
+            put("routeBlock", text("route_block"))
+            put("routeDirect", text("route_direct"))
+            put("autoReprovision", true)
+            put("logLevel", text("log_level", "info"))
+            put("tlsGroups", text("tls_curve_preset", "chrome"))
+            put("scanMode", text("default_scan_mode", "balanced"))
+            put("ipScan", text("default_scan", "v4"))
+            put("endpointCachePath", File(context.filesDir, "masque-gateway-cache.json").absolutePath)
+            put("endpointDiscovery", text("endpoint_discovery", "cache"))
+            put("transport", wireTransport)
+            put("noize", text("obfuscation_profile", "firewall"))
+            put("validationEnabled", prefs.getBoolean("wireguard_data_check", true))
+            if (effectivePeer != null) {
+                put("peer", effectivePeer)
+            }
+            put("peerFallback", true)
+            put("fragmentTls", text("h2_fragmentation", "on") == "on")
+            put("encryptedHello", prefs.getBoolean("encrypted_hello", false))
+            put("fastConnect", false)
+        }
+        tlsOptions.applyTo(json)
+        return json.toString()
     }
 }

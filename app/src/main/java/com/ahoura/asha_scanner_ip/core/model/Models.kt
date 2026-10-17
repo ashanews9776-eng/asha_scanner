@@ -116,6 +116,14 @@ data class ScanConfig(
     // the bundled cf_domains.txt asset, optionally extended by the user.
     val fallbackToDomains: Boolean = true,
     val fallbackDomains: List<String> = emptyList(),
+    // Gentle mode: max 25 workers, 6s timeout, 40 probes/s rate limiter for sensitive ISPs
+    val gentle: Boolean = false,
+    // Skip reachability scan and test targets directly via Phase-2 speed test
+    val phase2Only: Boolean = false,
+    // Anti-DPI TLS ClientHello fragmentation recipe
+    val antiDpi: AntiDpiConfig = AntiDpiConfig(),
+    // Pasted custom target list text (IPs, CIDRs, ranges, domains)
+    val pastedTargets: String = "",
 ) {
     companion object {
         /** Common Cloudflare-friendly TLS ports, as offered by the original UI. */
@@ -143,7 +151,7 @@ data class ScanResult(
     val passRate: Double = 1.0,  // Fraction of successful handshakes in stability phase
     val timestamp: Long = 0L,
 ) {
-    val endpoint: String get() = if (ip.contains(":")) "[$ip]:$port" else "$ip:$port"
+    val endpoint: String get() = if (ip.contains(":") && !ip.startsWith("[")) "[$ip]:$port" else "$ip:$port"
 
     /** Average latency of successful samples, in ms. 0 if none. */
     val avgLatencyMs: Double
@@ -158,7 +166,7 @@ data class ScanResult(
 
     /** Packet loss fraction in [0,1] given the number of attempts. */
     val loss: Double
-        get() = if (attempts <= 0) 1.0 else 1.0 - (latenciesMs.size.toDouble() / attempts)
+        get() = if (attempts <= 0) 0.0 else (1.0 - (latenciesMs.size.toDouble() / attempts)).coerceIn(0.0, 1.0)
 
     /** Throughput in Mbps for display. */
     val throughputMbps: Double get() = throughputBytesPerSec * 8.0 / 1_000_000.0

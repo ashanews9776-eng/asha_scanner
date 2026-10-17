@@ -57,24 +57,35 @@ object XrayProcessManager {
      */
     fun unpackGeoAssets(context: Context) {
         val dir = context.filesDir
+        val stamp = File(dir, "geo-version-xray")
+        val version = runCatching {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, 0).versionCode.toString()
+        }.getOrDefault("0")
+        val current = runCatching { stamp.readText().trim() }.getOrDefault("")
+        val geosite = File(dir, "geosite.dat")
+        val geoip = File(dir, "geoip.dat")
+
+        if (current == version && geosite.exists() && geosite.length() > 0L && geoip.exists() && geoip.length() > 0L) {
+            return
+        }
+
         listOf("geoip.dat", "geosite.dat").forEach { name ->
             val target = File(dir, name)
-            val assetLen = runCatching { context.assets.open(name).use { it.available().toLong() } }.getOrDefault(0L)
-            if (!target.exists() || target.length() == 0L || (assetLen > 0L && target.length() != assetLen)) {
-                val tmp = File(dir, "$name.tmp")
-                runCatching {
-                    context.assets.open(name).use { input ->
-                        tmp.outputStream().use { output -> input.copyTo(output) }
-                    }
-                    if (tmp.length() > 0L) {
-                        if (target.exists()) target.delete()
-                        tmp.renameTo(target)
-                    } else {
-                        tmp.delete()
-                    }
+            val tmp = File(dir, "$name.tmp")
+            runCatching {
+                context.assets.open(name).use { input ->
+                    tmp.outputStream().use { output -> input.copyTo(output) }
+                }
+                if (tmp.length() > 0L) {
+                    if (target.exists()) target.delete()
+                    tmp.renameTo(target)
+                } else {
+                    tmp.delete()
                 }
             }
         }
+        runCatching { stamp.writeText(version) }
     }
 
     /**
@@ -109,6 +120,7 @@ object XrayProcessManager {
         builder.directory(context.filesDir)
         builder.redirectErrorStream(true)
         builder.environment()["HOME"] = context.filesDir.absolutePath
+        builder.environment()["xray.location.asset"] = context.filesDir.absolutePath
         builder.environment()["XRAY_LOCATION_ASSET"] = context.filesDir.absolutePath
 
         val proc = try {

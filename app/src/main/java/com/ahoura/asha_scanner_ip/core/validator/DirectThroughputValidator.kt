@@ -38,6 +38,7 @@ class DirectThroughputValidator(
                 ssl = Tls.handshake(
                     socket, result.ip, result.port, sni,
                     alpn = listOf("http/1.1"), insecure = true, handshakeTimeoutMs = connectTo,
+                    antiDpi = cfg.antiDpi,
                 )
                 ssl
             } else {
@@ -101,11 +102,12 @@ class DirectThroughputValidator(
                 (result.latenciesMs + latency) else result.latenciesMs
 
             val ok = bodyBytes >= 8 * 1024 && throughput > 0
+            val isHealthy = if (cfg.phase2Only || result.attempts <= 1) ok else (result.healthy && ok)
             return result.copy(
                 latenciesMs = mergedLatencies,
                 throughputBytesPerSec = throughput,
                 speedTested = true,
-                healthy = result.healthy && ok,
+                healthy = isHealthy,
             )
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e

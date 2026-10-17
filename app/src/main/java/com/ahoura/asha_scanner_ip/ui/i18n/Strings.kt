@@ -207,8 +207,22 @@ interface AppStrings {
     val transportWireguardDesc: String
     val transportMasque: String
     val transportMasqueDesc: String
+    val transportWom: String
+    val transportWomDesc: String
     val transportGool: String
     val transportGoolDesc: String
+    val tlsHandshakeFragment: String
+    val tlsPresetAuto: String
+    val tlsPresetRecords: String
+    val tlsPresetCompact: String
+    val tlsPresetCustom: String
+    val tlsFragmentSize: String
+    val tlsFragmentDelay: String
+    val tlsSplitSni: String
+    val tlsEncryptedHello: String
+    val tlsEchConfigList: String
+    val transportPow: String
+    val transportPowDesc: String
     val transportPsiphon: String
     val transportPsiphonDesc: String
     val transportTor: String
@@ -217,6 +231,23 @@ interface AppStrings {
     val transportShardDesc: String
     val transportCustom: String
     val transportCustomDesc: String
+    val connectionSteps: String
+    val scanningAddress: String
+    val rejectedNotMasque: String
+    val rejectedCertRefused: String
+    val rejectedCertUnknown: String
+    val rejectedTimeout: String
+    val rejectedReset: String
+    val rejectedEof: String
+    val rejectedGeneral: String
+    val tryingSavedAddress: String
+    val savedAddressAnswered: String
+    val newCleanAddressSaved: String
+    val keySaved: String
+    val startingSecureTunnel: String
+    val creatingDeviceVpn: String
+    val routingDeviceTraffic: String
+    val connectionEstablished: String
     val psiphonOverWarp: String
     val psiphonOverWarpDesc: String
     val torOverWarp: String
@@ -285,6 +316,19 @@ interface AppStrings {
     val dialModeIpv6: String
     val unsafeFingerprint: String
 
+    // Network Guard & Live Path
+    val livePath: String
+    val livePathDesc: String
+    val networkGuard: String
+    val quicBlocker: String
+    val quicBlockerDesc: String
+    val webrtcBlocker: String
+    val webrtcBlockerDesc: String
+    val ipv6Blocker: String
+    val ipv6BlockerDesc: String
+    val dnsSinkhole: String
+    val dnsSinkholeDesc: String
+
     // Per-App Split Tunneling
     val splitTunnelTitle: String
     val splitTunnelSubtitle: String
@@ -297,6 +341,7 @@ interface AppStrings {
     val deselectAll: String
     val appsSelected: String
     val noAppsFound: String
+    val splitTunnelNoAppsWarning: String
     val perAppRouting: String
     val perAppRoutingDesc: String
 
@@ -333,6 +378,33 @@ interface AppStrings {
     val ipLeakWarning: String
     val city: String
     val isp: String
+
+    // SenPai v1.1 features
+    val scanProfile: String
+    val scanProfileFast: String
+    val scanProfileFastDesc: String
+    val scanProfileGentle: String
+    val scanProfileGentleDesc: String
+    val antiDpiTitle: String
+    val antiDpiSubtitle: String
+    val antiDpiRecipeLabel: String
+    val suggestedValues: String
+    val antiDpiValidationError: String
+    val pastedTargetsTitle: String
+    val pastedTargetsPlaceholder: String
+    val targetPreviewCount: String
+    val resolvingTargets: String
+    val skippedTargets: String
+    val skipReachability: String
+    val skipReachabilityDesc: String
+    val resumeScanBanner: String
+    val resumeScanBtn: String
+    val discardResumeBtn: String
+    val secEssentials: String
+    val secTargets: String
+    val secAntiDpi: String
+    val secProfile: String
+    val secResults: String
 }
 
 
@@ -524,8 +596,22 @@ internal object EN : AppStrings {
     override val transportWireguardDesc: String = "Fast direct UDP Noise protocol"
     override val transportMasque: String = "MASQUE"
     override val transportMasqueDesc: String = "CONNECT-IP over HTTP/3 & HTTP/2"
+    override val transportWom: String = "WOM"
+    override val transportWomDesc: String = "WARP WireGuard over MASQUE H2/TCP — bypasses UDP blocking"
     override val transportGool: String = "WARP-on-WARP"
     override val transportGoolDesc: String = "Double-layer WireGuard tunnel"
+    override val tlsHandshakeFragment: String = "TLS Handshake Fragmentation"
+    override val tlsPresetAuto: String = "Auto"
+    override val tlsPresetRecords: String = "Records"
+    override val tlsPresetCompact: String = "Compact"
+    override val tlsPresetCustom: String = "Custom"
+    override val tlsFragmentSize: String = "Fragment Size (Bytes)"
+    override val tlsFragmentDelay: String = "Fragment Delay (ms)"
+    override val tlsSplitSni: String = "Split Server Name (SNI)"
+    override val tlsEncryptedHello: String = "Encrypted Client Hello (ECH)"
+    override val tlsEchConfigList: String = "Custom Base64 ECHConfigList"
+    override val transportPow: String = "Asha PoW"
+    override val transportPowDesc: String = "Dual-layer stealth cloud shield with dynamic clean gateway scanning"
     override val transportPsiphon: String = "Psiphon"
     override val transportPsiphonDesc: String = "Multi-protocol ladder · 25 countries"
     override val transportTor: String = "Tor"
@@ -534,6 +620,23 @@ internal object EN : AppStrings {
     override val transportShardDesc: String = "Cloudflare edge pool & TLS fragment"
     override val transportCustom: String = "Custom Proxy"
     override val transportCustomDesc: String = "VLESS / Trojan / StormDNS + Clean IP"
+    override val connectionSteps: String = "Connection steps"
+    override val scanningAddress: String = "Scanning address"
+    override val rejectedNotMasque: String = "Rejected: Not a MASQUE gateway"
+    override val rejectedCertRefused: String = "Rejected: Device certificate refused"
+    override val rejectedCertUnknown: String = "Rejected: Certificate unknown"
+    override val rejectedTimeout: String = "Rejected: Timeout"
+    override val rejectedReset: String = "Rejected: Connection reset"
+    override val rejectedEof: String = "Rejected: Handshake incomplete"
+    override val rejectedGeneral: String = "Rejected: Address declined"
+    override val tryingSavedAddress: String = "Trying saved address"
+    override val savedAddressAnswered: String = "Saved address answered"
+    override val newCleanAddressSaved: String = "New clean address saved"
+    override val keySaved: String = "Key acquired"
+    override val startingSecureTunnel: String = "Starting secure tunnel"
+    override val creatingDeviceVpn: String = "Creating device VPN interface"
+    override val routingDeviceTraffic: String = "Routing device traffic through tunnel"
+    override val connectionEstablished: String = "Connection established"
     override val psiphonOverWarp: String = "Psiphon over WARP"
     override val psiphonOverWarpDesc: String = "Tunnel Psiphon through Cloudflare WARP to bypass carrier blocks"
     override val torOverWarp: String = "Tor over WARP"
@@ -602,6 +705,19 @@ internal object EN : AppStrings {
     override val dialModeIpv6: String = "IPv6 Only"
     override val unsafeFingerprint: String = "Unsafe (Custom TLS)"
 
+    // Network Guard & Live Path
+    override val livePath: String = "Live Path"
+    override val livePathDesc: String = "Inspect real-time traffic flow hop-by-hop"
+    override val networkGuard: String = "Network Guard & Privacy"
+    override val quicBlocker: String = "QUIC Blocker"
+    override val quicBlockerDesc: String = "Instantly reject UDP 443 with ICMP unreachable for zero-delay TCP fallback"
+    override val webrtcBlocker: String = "Anti-WebRTC Leak"
+    override val webrtcBlockerDesc: String = "Drop STUN and TURN packets to prevent browser IP leaks"
+    override val ipv6Blocker: String = "IPv6 Leak Shield"
+    override val ipv6BlockerDesc: String = "Drop unroutable IPv6 packets on IPv4 tunnels"
+    override val dnsSinkhole: String = "DNS Ad & Tracker Sinkhole"
+    override val dnsSinkholeDesc: String = "Sinkhole ad and tracker queries on the TUN interface"
+
     // Per-App Split Tunneling
     override val splitTunnelTitle: String = "Per-App Routing"
     override val splitTunnelSubtitle: String = "Choose which apps tunnel through VPN or bypass directly"
@@ -614,6 +730,7 @@ internal object EN : AppStrings {
     override val deselectAll: String = "Clear"
     override val appsSelected: String = "apps selected"
     override val noAppsFound: String = "No applications found"
+    override val splitTunnelNoAppsWarning: String = "Select at least one app for traffic to route through VPN."
     override val perAppRouting: String = "Per-App Proxy"
     override val perAppRoutingDesc: String = "Route or exclude specific applications from the VPN tunnel"
 
@@ -650,6 +767,33 @@ internal object EN : AppStrings {
     override val ipLeakWarning: String = "DIRECT / LEAK (Inside Iran)"
     override val city: String = "City"
     override val isp: String = "ISP"
+
+    // SenPai v1.1 features
+    override val scanProfile: String = "Scan Profile"
+    override val scanProfileFast: String = "Fast (Default)"
+    override val scanProfileFastDesc: String = "Standard concurrency & speed for normal networks"
+    override val scanProfileGentle: String = "Gentle (Safe)"
+    override val scanProfileGentleDesc: String = "25 workers max, 40 probes/s, 6s timeout to prevent ISP throttling"
+    override val antiDpiTitle: String = "Anti-DPI Fragmentation"
+    override val antiDpiSubtitle: String = "Slices TLS ClientHello packets into fragments to bypass deep packet inspection (SNI block)"
+    override val antiDpiRecipeLabel: String = "Fragmentation Recipe (JSON)"
+    override val suggestedValues: String = "Suggested values"
+    override val antiDpiValidationError: String = "Invalid recipe JSON syntax"
+    override val pastedTargetsTitle: String = "Target List / Custom Targets"
+    override val pastedTargetsPlaceholder: String = "Paste IPs, CIDRs (e.g. 104.16.0.0/24), ranges (104.16.1.1-50), or domains..."
+    override val targetPreviewCount: String = "{0} targets ready ({1} domains resolved)"
+    override val resolvingTargets: String = "Resolving domain targets..."
+    override val skippedTargets: String = "{0} skipped / invalid"
+    override val skipReachability: String = "Skip Reachability Scan"
+    override val skipReachabilityDesc: String = "Bypass Phase 1 probe and test throughput on targets directly"
+    override val resumeScanBanner: String = "Paused scan: {0}/{1} tested, {2} healthy found"
+    override val resumeScanBtn: String = "Resume Scan"
+    override val discardResumeBtn: String = "Discard"
+    override val secEssentials: String = "01 / ESSENTIALS & CONFIG"
+    override val secTargets: String = "02 / TARGETS & IP POOL"
+    override val secAntiDpi: String = "03 / ANTI-DPI & EVASION"
+    override val secProfile: String = "04 / SCAN PROFILE & PARAMS"
+    override val secResults: String = "05 / RESULTS & METRICS"
 }
 
 
@@ -841,8 +985,22 @@ internal object FA : AppStrings {
     override val transportWireguardDesc: String = "پروتکل پرسرعت مستقیم UDP بر پایه Noise"
     override val transportMasque: String = "ماسک (MASQUE)"
     override val transportMasqueDesc: String = "دور زدن اختلال با CONNECT-IP روی HTTP/3 و HTTP/2"
+    override val transportWom: String = "وایرگارد روی ماسک (WOM)"
+    override val transportWomDesc: String = "حمل وایرگارد درون استریم TCP/H2 — عبور قطعی از فیلترینگ UDP"
     override val transportGool: String = "وارپ دوگانه"
     override val transportGoolDesc: String = "دو لایه تانل وایرگارد تو در تو برای فیلترینگ شدید"
+    override val tlsHandshakeFragment: String = "تکه‌تکه کردن دست‌دهی TLS"
+    override val tlsPresetAuto: String = "خودکار"
+    override val tlsPresetRecords: String = "Records"
+    override val tlsPresetCompact: String = "Compact"
+    override val tlsPresetCustom: String = "سفارشی"
+    override val tlsFragmentSize: String = "اندازه قطعه (بایت)"
+    override val tlsFragmentDelay: String = "تأخیر ارسال (میلی‌ثانیه)"
+    override val tlsSplitSni: String = "تقسیم نام سرور (SNI)"
+    override val tlsEncryptedHello: String = "سلام اولیه رمزگذاری‌شده (ECH)"
+    override val tlsEchConfigList: String = "لیست کانفیگ ECH (فرمت Base64)"
+    override val transportPow: String = "سپر ابری PoW"
+    override val transportPowDesc: String = "سپر دو لایه نامرئی با اسکن زنده و پویای سرورهای کلودفلر"
     override val transportPsiphon: String = "سایفون"
     override val transportPsiphonDesc: String = "سیستم نردبانی چند پروتکلی با ۲۵ کشور خروجی"
     override val transportTor: String = "تور (Tor)"
@@ -851,6 +1009,23 @@ internal object FA : AppStrings {
     override val transportShardDesc: String = "استخر لبه کلودفلر همراه با فرگمنت TLS"
     override val transportCustom: String = "پروکسی سفارشی"
     override val transportCustomDesc: String = "کانفیگ‌های VLESS / تروجان / StormDNS با آی‌پی تمیز"
+    override val connectionSteps: String = "مراحل اتصال"
+    override val scanningAddress: String = "اسکن آدرس"
+    override val rejectedNotMasque: String = "این آدرس دروازه MASQUE نیست"
+    override val rejectedCertRefused: String = "گواهی دستگاه پذیرفته نشد"
+    override val rejectedCertUnknown: String = "گواهی ناشناخته"
+    override val rejectedTimeout: String = "پاسخی نیامد"
+    override val rejectedReset: String = "اتصال وسط دست‌دهی قطع شد"
+    override val rejectedEof: String = "دست‌دهی TLS نیمه‌کاره ماند"
+    override val rejectedGeneral: String = "آدرس رد شد"
+    override val tryingSavedAddress: String = "امتحان آی‌پی ذخیره‌شده"
+    override val savedAddressAnswered: String = "آی‌پی ذخیره‌شده پاسخ داد"
+    override val newCleanAddressSaved: String = "آی‌پی تمیز جدید ذخیره شد"
+    override val keySaved: String = "کلید گرفته شد"
+    override val startingSecureTunnel: String = "راه‌اندازی تونل امن"
+    override val creatingDeviceVpn: String = "ساخت VPN دستگاه"
+    override val routingDeviceTraffic: String = "هدایت ترافیک به تونل"
+    override val connectionEstablished: String = "اتصال برقرار شد"
     override val psiphonOverWarp: String = "سایفون از روی وارپ"
     override val psiphonOverWarpDesc: String = "هدایت تانل سایفون از درون کلودفلر وارپ جهت عبور از مسدودی اپراتور"
     override val torOverWarp: String = "تور از روی وارپ"
@@ -919,6 +1094,19 @@ internal object FA : AppStrings {
     override val dialModeIpv6: String = "فقط IPv6"
     override val unsafeFingerprint: String = "نامطمئن (سفارشی بدون شبیه‌سازی)"
 
+    // Network Guard & Live Path
+    override val livePath: String = "مسیر زنده شبکه"
+    override val livePathDesc: String = "مشاهده جریان ترافیک و گره‌های ارتباطی به صورت گام‌به‌گام"
+    override val networkGuard: String = "سپر شبکه و حریم خصوصی"
+    override val quicBlocker: String = "مسدودساز هوشمند QUIC"
+    override val quicBlockerDesc: String = "پاسخ فوری ICMP به UDP 443 جهت سوییچ آنی برنامه‌ها به TCP بدون معطلی"
+    override val webrtcBlocker: String = "ضد نشت WebRTC"
+    override val webrtcBlockerDesc: String = "مسدودسازی بسته‌های STUN و TURN جهت جلوگیری از لو رفتن آی‌پی واقعی"
+    override val ipv6Blocker: String = "محافظ نشت IPv6"
+    override val ipv6BlockerDesc: String = "مسدودسازی بسته‌های بدون مسیر IPv6 روی تانل‌های IPv4"
+    override val dnsSinkhole: String = "حفره فیلتر تبلیغات و ردیاب‌ها"
+    override val dnsSinkholeDesc: String = "پاسخ محلی 0.0.0.0 به دامنه‌های تبلیغاتی و ردیابی در رابط TUN"
+
     // Per-App Split Tunneling
     override val splitTunnelTitle: String = "تفکیک برنامه‌ها (Per-App)"
     override val splitTunnelSubtitle: String = "انتخاب برنامه‌هایی که از فیلترشکن عبور می‌کنند یا مستقیم متصل می‌شوند"
@@ -931,6 +1119,7 @@ internal object FA : AppStrings {
     override val deselectAll: String = "پاک کردن"
     override val appsSelected: String = "برنامه انتخاب‌شده"
     override val noAppsFound: String = "برنامه‌ای یافت نشد"
+    override val splitTunnelNoAppsWarning: String = "حداقل یک برنامه را برای عبور از فیلترشکن انتخاب کنید."
     override val perAppRouting: String = "تفکیک برنامه‌ها"
     override val perAppRoutingDesc: String = "تعیین برنامه‌های متصل به فیلترشکن یا اتصال مستقیم برنامه‌های داخلی"
 
@@ -967,6 +1156,33 @@ internal object FA : AppStrings {
     override val ipLeakWarning: String = "مستقیم / بدون محافظت (داخل ایران)"
     override val city: String = "شهر"
     override val isp: String = "ارائه‌دهنده اینترنت"
+
+    // SenPai v1.1 features
+    override val scanProfile: String = "پروفایل اسکن"
+    override val scanProfileFast: String = "سریع (پیش‌فرض)"
+    override val scanProfileFastDesc: String = "همزمانی و سرعت استاندارد برای شبکه‌های عادی"
+    override val scanProfileGentle: String = "آرام و ملایم (ایمن)"
+    override val scanProfileGentleDesc: String = "حداکثر ۲۵ ورکر، محدودیت ۴۰ پروب در ثانیه و مهلت ۶ ثانیه برای جلوگیری از اختلال و قطع ارتباط توسط اپراتور"
+    override val antiDpiTitle: String = "تکه‌تکه‌سازی ضد فیلترینگ (Anti-DPI)"
+    override val antiDpiSubtitle: String = "برش پکت‌های TLS ClientHello به قطعات ریز برای دور زدن فیلترینگ SNI و DPI اپراتورها"
+    override val antiDpiRecipeLabel: String = "دستورالعمل قطعه‌بندی (JSON)"
+    override val suggestedValues: String = "مقادیر پیشنهادی"
+    override val antiDpiValidationError: String = "فرمت جیسون دستورالعمل نامعتبر است"
+    override val pastedTargetsTitle: String = "لیست اهداف / آی‌پی و دامنه‌های دلخواه"
+    override val pastedTargetsPlaceholder: String = "آی‌پی، رنج CIDR (مانند 104.16.0.0/24)، بازه (104.16.1.1-50) یا دامنه‌ها را وارد کنید..."
+    override val targetPreviewCount: String = "{0} آدرس آماده ({1} دامنه تبدیل شد)"
+    override val resolvingTargets: String = "در حال تبدیل دامنه‌ها به آی‌پی..."
+    override val skippedTargets: String = "{0} مورد نامعتبر / رد شد"
+    override val skipReachability: String = "رد کردن اسکن اولیه در دسترس بودن"
+    override val skipReachabilityDesc: String = "پرش مستقیم به تست سرعت و دانلود بر روی اهداف وارد شده"
+    override val resumeScanBanner: String = "اسکن قبلی متوقف‌شده: {0} از {1} بررسی شده، {2} سالم یافت شد"
+    override val resumeScanBtn: String = "ادامه اسکن"
+    override val discardResumeBtn: String = "انصراف و حذف"
+    override val secEssentials: String = "۰۱ / تنظیمات اصلی و کانفیگ"
+    override val secTargets: String = "۰۲ / اهداف و منبع آی‌پی"
+    override val secAntiDpi: String = "۰۳ / ضد فیلترینگ و دور زدن DPI"
+    override val secProfile: String = "۰۴ / پروفایل و سرعت اسکن"
+    override val secResults: String = "۰۵ / نتایج و خروجی‌ها"
 }
 
 

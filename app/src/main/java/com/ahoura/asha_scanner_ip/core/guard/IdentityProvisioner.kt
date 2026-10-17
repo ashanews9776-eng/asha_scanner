@@ -73,7 +73,11 @@ object IdentityProvisioner {
      * a file that actually contains valid identity fields and certificates counts.
      */
     fun hasIdentity(context: Context, protocol: String): Boolean {
-        val base = File(context.filesDir, "aether.toml")
+        return checkBase(File(context.filesDir, "uac-pow.toml"), protocol) ||
+            checkBase(File(context.filesDir, "aether.toml"), protocol)
+    }
+
+    private fun checkBase(base: File, protocol: String): Boolean {
         return when (protocol.lowercase()) {
             "masque" -> isValidMasqueToml(siblingFile(base, "masque"))
             // GOOL/WoW dials two WARP identities, so both halves must exist.

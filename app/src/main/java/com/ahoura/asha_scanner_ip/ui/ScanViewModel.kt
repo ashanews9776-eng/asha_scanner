@@ -14,7 +14,10 @@ import com.ahoura.asha_scanner_ip.core.parser.ProxyParser
 import com.ahoura.asha_scanner_ip.data.SettingsStore
 import com.ahoura.asha_scanner_ip.ui.i18n.Lang
 import com.ahoura.asha_scanner_ip.core.dns.DnsProbe
+import com.ahoura.asha_scanner_ip.core.guard.CoreConfig
 import com.ahoura.asha_scanner_ip.core.guard.SecureStore
+import com.ahoura.asha_scanner_ip.core.guard.TlsFragmentMode
+import com.ahoura.asha_scanner_ip.core.guard.TlsOptions
 import com.msnguard.vpn.NativeCore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +51,9 @@ data class UiState(
     val updateInfo: UpdateInfo? = null,
     val subUrl: String? = null,
     val ispInfo: String = "Detecting ISP...",
+    val targetPreview: com.ahoura.asha_scanner_ip.core.ipsrc.TargetPreview? = null,
+    val resumeSnapshot: com.ahoura.asha_scanner_ip.core.engine.ScanSnapshot? = null,
+    val isResolvingTargets: Boolean = false,
 )
 
 class ScanViewModel(app: Application) : AndroidViewModel(app) {
@@ -90,7 +96,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { guardPrefs.getInt(key, def) }.getOrDefault(def)
 
     val selectedTransport = MutableStateFlow(
-        getPrefString("default_protocol", "wireguard")
+        getPrefString("default_protocol", "pow")
     )
     val tunnelMode = MutableStateFlow(
         getPrefString("tunnel_mode", "vpn")
@@ -128,6 +134,42 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     val masqueTransport = MutableStateFlow(
         getPrefString("default_masque_transport", "h3")
     )
+    val guardQuicBlock = MutableStateFlow(
+        getPrefBool("guard_quic_block", true)
+    )
+    val guardWebRtcBlock = MutableStateFlow(
+        getPrefBool("guard_webrtc_block", true)
+    )
+    val guardIpv6Block = MutableStateFlow(
+        getPrefBool("guard_ipv6_block", true)
+    )
+    val guardDnsSinkhole = MutableStateFlow(
+        getPrefBool("guard_dns_sinkhole", true)
+    )
+
+    fun setGuardQuicBlock(value: Boolean) {
+        guardQuicBlock.value = value
+        guardPrefs.edit().putBoolean("guard_quic_block", value).apply()
+        viewModelScope.launch { settings.setQuicBlock(value) }
+    }
+
+    fun setGuardWebRtcBlock(value: Boolean) {
+        guardWebRtcBlock.value = value
+        guardPrefs.edit().putBoolean("guard_webrtc_block", value).apply()
+        viewModelScope.launch { settings.setWebRtcBlock(value) }
+    }
+
+    fun setGuardIpv6Block(value: Boolean) {
+        guardIpv6Block.value = value
+        guardPrefs.edit().putBoolean("guard_ipv6_block", value).apply()
+        viewModelScope.launch { settings.setIpv6Block(value) }
+    }
+
+    fun setGuardDnsSinkhole(value: Boolean) {
+        guardDnsSinkhole.value = value
+        guardPrefs.edit().putBoolean("guard_dns_sinkhole", value).apply()
+        viewModelScope.launch { settings.setDnsSinkhole(value) }
+    }
 
     fun setSelectedTransport(proto: String) {
         selectedTransport.value = proto
@@ -192,6 +234,39 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     fun setMasqueTransport(t: String) {
         masqueTransport.value = t
         guardPrefs.edit().putString("default_masque_transport", t).apply()
+    }
+
+    val tlsOptions = MutableStateFlow(
+        CoreConfig.getTlsOptions(getApplication())
+    )
+
+    fun setTlsOptions(options: TlsOptions) {
+        tlsOptions.value = options
+        CoreConfig.setTlsOptions(getApplication(), options)
+    }
+
+    fun setTlsFragmentMode(mode: TlsFragmentMode) {
+        setTlsOptions(tlsOptions.value.copy(fragmentMode = mode))
+    }
+
+    fun setTlsFragmentSize(size: String) {
+        setTlsOptions(tlsOptions.value.copy(fragmentSize = size))
+    }
+
+    fun setTlsFragmentDelay(delay: String) {
+        setTlsOptions(tlsOptions.value.copy(fragmentDelay = delay))
+    }
+
+    fun setTlsSplitSni(split: Boolean) {
+        setTlsOptions(tlsOptions.value.copy(splitSni = split))
+    }
+
+    fun setTlsCustomEch(custom: Boolean) {
+        setTlsOptions(tlsOptions.value.copy(customEch = custom))
+    }
+
+    fun setTlsEchConfigList(list: String) {
+        setTlsOptions(tlsOptions.value.copy(echConfigList = list))
     }
 
     val upstreamProxy = MutableStateFlow(
@@ -340,11 +415,12 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         transport: String = "wireguard"
     ) {
         viewModelScope.launch {
-            if (com.ahoura.asha_scanner_ip.core.guard.CoreConfig.isWarpEndpoint(cleanIp)) {
-                val effectivePort = if (transport.lowercase() in listOf("masque", "mim")) 443 else 2408
-                val endpoint = if (cleanIp.contains(":")) cleanIp else "$cleanIp:$effectivePort"
-                setManualEndpoint(endpoint)
-            }
+            val formatted = com.ahoura.asha_scanner_ip.core.guard.CoreConfig.formatPeerForProtocol(cleanIp, transport)
+                ?: if (cleanIp.contains(":")) cleanIp else "$cleanIp:$port"
+            setManualEndpoint(formatted)
+            context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+                .edit().putString("clean_ip", cleanIp.trim()).apply()
+            com.ahoura.asha_scanner_ip.core.guard.CoreConfig.syncCleanH2Peers(context, listOf(formatted))
             setSelectedTransport(transport)
             startVpnTransport(context, transport)
         }
@@ -812,19 +888,49 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         com.ahoura.asha_scanner_ip.core.vpn.VpnManager.init(app)
-        // Load the precise Cloudflare IPv4 ranges (ircfspace list) and the
-        // open-site fallback domain list bundled in assets, off the main thread.
+        com.ahoura.asha_scanner_ip.core.engine.ScanStateStore.init(app.filesDir)
+        val existingSnapshot = com.ahoura.asha_scanner_ip.core.engine.ScanStateStore.load()
+        if (existingSnapshot != null) {
+            _state.update { it.copy(resumeSnapshot = existingSnapshot) }
+        }
+
+        // Load the precise Cloudflare IPv4 ranges and settings off the main thread.
         viewModelScope.launch(Dispatchers.IO) {
             val ranges = readAssetLines("cf_ipv4.txt")
             val domains = readAssetLines("cf_domains.txt")
             bundledDomains = domains
+
+            val gentle = runCatching { settings.scanGentle.first() }.getOrDefault(false)
+            val phase2Only = runCatching { settings.scanPhase2Only.first() }.getOrDefault(false)
+            val pasted = runCatching { settings.scanPastedTargets.first() }.getOrDefault("")
+            val adEnabled = runCatching { settings.antiDpiEnabled.first() }.getOrDefault(true)
+            val adFinalmask = runCatching { settings.antiDpiFinalmask.first() }.getOrDefault(com.ahoura.asha_scanner_ip.core.model.AntiDpiConfig.DEFAULT_FINALMASK)
+            val adFp = runCatching { settings.antiDpiFingerprint.first() }.getOrDefault("unsafe")
+            val adAlpn = runCatching { settings.antiDpiAlpn.first() }.getOrDefault("http/1.1")
+            val adCiphers = runCatching { settings.antiDpiCipherSuites.first() }.getOrDefault(com.ahoura.asha_scanner_ip.core.model.AntiDpiConfig.DEFAULT_CIPHERS)
+
+            val antiDpi = com.ahoura.asha_scanner_ip.core.model.AntiDpiConfig(
+                enabled = adEnabled,
+                finalmask = adFinalmask,
+                fingerprint = adFp,
+                alpn = adAlpn,
+                cipherSuites = adCiphers,
+            )
+
             _state.update {
                 it.copy(
                     scanConfig = it.scanConfig.copy(
                         customV4Ranges = if (ranges.isNotEmpty()) ranges else it.scanConfig.customV4Ranges,
                         fallbackDomains = mergeDomains(domains, it.fallbackDomainsText),
+                        gentle = gentle,
+                        phase2Only = phase2Only,
+                        pastedTargets = pasted,
+                        antiDpi = antiDpi,
                     )
                 )
+            }
+            if (pasted.isNotBlank()) {
+                onPastedTargetsChange(pasted)
             }
             checkUpdate()
             detectIpInfo()
@@ -862,10 +968,12 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         )
         
         for (urlStr in endpoints) {
+            var conn: java.net.HttpURLConnection? = null
             try {
                 val url = java.net.URL(urlStr)
-                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn = url.openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 3000
+                conn.readTimeout = 3000
                 if (conn.responseCode == 200) {
                     val lines = conn.inputStream.bufferedReader().readLines()
                     val colo = lines.find { it.startsWith("colo=") }?.split("=")?.getOrNull(1) ?: "???"
@@ -888,7 +996,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     return TraceBasic(colo, loc, isp)
                 }
-            } catch (e: Exception) { continue }
+            } catch (e: Exception) { continue } finally { conn?.disconnect() }
         }
         return null
     }
@@ -899,16 +1007,18 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             "https://api.db-ip.com/v2/free/self/organization"
         )
         for (apiUrl in apis) {
+            var conn: java.net.HttpURLConnection? = null
             try {
                 val url = java.net.URL(apiUrl)
-                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn = url.openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 2500
+                conn.readTimeout = 2500
                 if (conn.responseCode == 200) {
                     val res = conn.inputStream.bufferedReader().readText().trim()
                     val found = "\"([^\"]+)\"".toRegex().findAll(res).lastOrNull()?.groupValues?.get(1)
                     if (found != null && found.length < 40 && !found.contains("{")) return found
                 }
-            } catch (e: Exception) { continue }
+            } catch (e: Exception) { continue } finally { conn?.disconnect() }
         }
         return null
     }
@@ -916,9 +1026,10 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     private data class TraceBasic(val colo: String, val loc: String, val isp: String)
 
     private fun checkUpdate() {
+        var conn: java.net.HttpURLConnection? = null
         try {
             val url = java.net.URL("https://api.github.com/repos/ashanews9776-eng/asha_scanner/releases/latest")
-            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn = url.openConnection() as java.net.HttpURLConnection
             conn.requestMethod = "GET"
             conn.connectTimeout = 5000
             conn.readTimeout = 5000
@@ -942,6 +1053,8 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             }
         } catch (e: Exception) {
             e.printStackTrace()
+        } finally {
+            conn?.disconnect()
         }
     }
 
@@ -1059,18 +1172,100 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun start() {
+    private var targetParseJob: Job? = null
+
+    fun onPastedTargetsChange(text: String) {
+        _state.update {
+            it.copy(
+                scanConfig = it.scanConfig.copy(pastedTargets = text),
+                isResolvingTargets = text.isNotBlank(),
+            )
+        }
+        viewModelScope.launch { settings.setScanPastedTargets(text) }
+
+        targetParseJob?.cancel()
+        targetParseJob = viewModelScope.launch(Dispatchers.IO) {
+            if (text.isBlank()) {
+                _state.update {
+                    it.copy(
+                        targetPreview = null,
+                        isResolvingTargets = false,
+                        scanConfig = it.scanConfig.copy(explicitIps = emptyList()),
+                    )
+                }
+                return@launch
+            }
+            val preview = com.ahoura.asha_scanner_ip.core.ipsrc.TargetParser.parse(text, resolveDomains = true)
+            _state.update {
+                it.copy(
+                    targetPreview = preview,
+                    isResolvingTargets = false,
+                    scanConfig = it.scanConfig.copy(explicitIps = preview.ips),
+                )
+            }
+        }
+    }
+
+    fun setGentle(enabled: Boolean) {
+        updateScanConfig { it.copy(gentle = enabled) }
+        viewModelScope.launch { settings.setScanGentle(enabled) }
+    }
+
+    fun setPhase2Only(enabled: Boolean) {
+        updateScanConfig { it.copy(phase2Only = enabled) }
+        viewModelScope.launch { settings.setScanPhase2Only(enabled) }
+    }
+
+    fun setAntiDpiEnabled(enabled: Boolean) {
+        updateScanConfig { it.copy(antiDpi = it.antiDpi.copy(enabled = enabled)) }
+        viewModelScope.launch { settings.setAntiDpiEnabled(enabled) }
+    }
+
+    fun onAntiDpiRecipeChange(recipe: String) {
+        updateScanConfig { it.copy(antiDpi = it.antiDpi.copy(finalmask = recipe)) }
+        viewModelScope.launch { settings.setAntiDpiFinalmask(recipe) }
+    }
+
+    fun resetAntiDpiToDefaults() {
+        val suggested = com.ahoura.asha_scanner_ip.core.model.AntiDpiConfig.suggestedValues()
+        updateScanConfig { it.copy(antiDpi = suggested) }
+        viewModelScope.launch {
+            settings.setAntiDpiEnabled(suggested.enabled)
+            settings.setAntiDpiFinalmask(suggested.finalmask)
+            settings.setAntiDpiFingerprint(suggested.fingerprint)
+            settings.setAntiDpiAlpn(suggested.alpn)
+            settings.setAntiDpiCipherSuites(suggested.cipherSuites)
+        }
+    }
+
+    fun resumeScan() {
+        start(resume = true)
+    }
+
+    fun discardResume() {
+        com.ahoura.asha_scanner_ip.core.engine.ScanStateStore.clear()
+        _state.update { it.copy(resumeSnapshot = null) }
+    }
+
+    fun start(resume: Boolean = false) {
         val s = _state.value
         val proxy = s.parsedProxy   // may be null — modes that scan random/explicit IPs
         if (s.isScanning) return
-        _state.update { it.copy(isScanning = true, progress = ScanProgress(phase = ScanPhase.PROBING)) }
+        val snapshotToResume = if (resume) s.resumeSnapshot else null
+        _state.update {
+            it.copy(
+                isScanning = true,
+                resumeSnapshot = null,
+                progress = ScanProgress(phase = ScanPhase.PROBING),
+            )
+        }
         
         // Start sub server
         viewModelScope.launch { subServer.start() }
 
         scanJob = viewModelScope.launch {
             try {
-                engine.scan(proxy, s.scanConfig).collect { p ->
+                engine.scan(proxy, s.scanConfig, snapshotToResume).collect { p ->
                     val url = if (subServer.isListening) subServer.getUrl() else null
                     _state.update { it.copy(progress = p, subUrl = url) }
                     subServer.updateResults(p.best, proxy)
@@ -1079,6 +1274,11 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                         getApplication<android.app.Application>()
                             .getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
                             .edit().putString("clean_ip", topIp).apply()
+                        val topPeers = p.best.take(5).map { it.ip }
+                        com.ahoura.asha_scanner_ip.core.guard.CoreConfig.syncCleanH2Peers(
+                            getApplication(),
+                            topPeers
+                        )
                     }
                 }
             } catch (_: Throwable) {
@@ -1097,10 +1297,12 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         scanJob?.cancel()
         scanJob = null
         subServer.stop()
+        val snapshot = com.ahoura.asha_scanner_ip.core.engine.ScanStateStore.load()
         _state.update {
             it.copy(
                 isScanning = false,
                 subUrl = null,
+                resumeSnapshot = snapshot,
                 progress = it.progress.copy(phase = ScanPhase.CANCELLED),
             )
         }
@@ -1158,6 +1360,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         val cleanIp = _state.value.progress.best.firstOrNull()?.ip
             ?: context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).getString("clean_ip", null)?.trim()
         val isChained = when (transport.lowercase()) {
+            "pow" -> true
             "psiphon" -> psiphonChained.value
             "tor" -> torChained.value
             else -> false

@@ -30,6 +30,7 @@ object XrayConfigBuilder {
         bypassIran: Boolean = false,
         dnsServers: List<String> = emptyList(),
         includeTun: Boolean = false,
+        antiDpi: com.ahoura.asha_scanner_ip.core.model.AntiDpiConfig? = null,
     ): JSONObject {
         val root = JSONObject()
         root.put("log", JSONObject().put("loglevel", "warning"))
@@ -43,7 +44,7 @@ object XrayConfigBuilder {
         root.put("inbounds", inbounds)
 
         val outbounds = JSONArray()
-        outbounds.put(buildOutbound(proxy, candidateIp ?: proxy.address))
+        outbounds.put(buildOutbound(proxy, candidateIp ?: proxy.address, antiDpi))
         outbounds.put(JSONObject().apply {
             put("tag", "direct")
             put("protocol", "freedom")
@@ -78,7 +79,7 @@ object XrayConfigBuilder {
             // bundled in assets (entries "IR" / "ir"; loaders match fold-case).
             rules.put(JSONObject().apply {
                 put("type", "field")
-                put("domain", JSONArray(listOf("domain:ir", "geosite:category-ir", "geosite:ir")))
+                put("domain", JSONArray(listOf("domain:ir", "geosite:category-ir")))
                 put("outboundTag", "direct")
             })
             rules.put(JSONObject().apply {
@@ -148,7 +149,8 @@ object XrayConfigBuilder {
         bypassIran: Boolean = false,
         dnsServers: List<String> = emptyList(),
         includeTun: Boolean = false,
-    ): String = buildClientVpnConfig(proxy, candidateIp, socksPort, httpPort, bypassIran, dnsServers, includeTun).toString(2)
+        antiDpi: com.ahoura.asha_scanner_ip.core.model.AntiDpiConfig? = null,
+    ): String = buildClientVpnConfig(proxy, candidateIp, socksPort, httpPort, bypassIran, dnsServers, includeTun, antiDpi).toString(2)
 
     private fun buildTunInbound(): JSONObject = JSONObject().apply {
         put("tag", "tun")
@@ -180,7 +182,11 @@ object XrayConfigBuilder {
         put("settings", JSONObject().put("udp", true).put("auth", "noauth"))
     }
 
-    private fun buildOutbound(proxy: ProxyConfig, candidateIp: String): JSONObject {
+    private fun buildOutbound(
+        proxy: ProxyConfig,
+        candidateIp: String,
+        antiDpi: com.ahoura.asha_scanner_ip.core.model.AntiDpiConfig? = null,
+    ): JSONObject {
         val outbound = JSONObject().put("tag", "proxy")
         val settings = JSONObject()
         when (proxy.protocol) {
@@ -221,11 +227,14 @@ object XrayConfigBuilder {
             }
         }
         outbound.put("settings", settings)
-        outbound.put("streamSettings", buildStreamSettings(proxy))
+        outbound.put("streamSettings", buildStreamSettings(proxy, antiDpi))
         return outbound
     }
 
-    private fun buildStreamSettings(proxy: ProxyConfig): JSONObject {
+    private fun buildStreamSettings(
+        proxy: ProxyConfig,
+        antiDpi: com.ahoura.asha_scanner_ip.core.model.AntiDpiConfig? = null,
+    ): JSONObject {
         if (proxy.protocol == Protocol.STORMDNS) {
             return JSONObject().apply {
                 put("network", "tcp")
@@ -236,20 +245,36 @@ object XrayConfigBuilder {
         stream.put("network", proxy.network.ifBlank { "tcp" })
         stream.put("security", proxy.security.ifBlank { "none" })
 
+        val effectiveFingerprint = if (antiDpi != null && antiDpi.enabled && antiDpi.fingerprint.isNotBlank()) {
+            antiDpi.fingerprint
+        } else {
+            proxy.fingerprint
+        }
+        val effectiveAlpn = if (antiDpi != null && antiDpi.enabled && antiDpi.alpn.isNotBlank()) {
+            listOf(antiDpi.alpn)
+        } else {
+            proxy.alpn
+        }
+        val effectiveCipherSuites = if (antiDpi != null && antiDpi.enabled && antiDpi.cipherSuites.isNotBlank()) {
+            antiDpi.cipherSuites
+        } else {
+            proxy.cipherSuites
+        }
+
         when (proxy.security.lowercase()) {
             "tls" -> stream.put("tlsSettings", JSONObject().apply {
                 put("serverName", proxy.effectiveSni())
                 put("allowInsecure", proxy.allowInsecure)
-                if (proxy.fingerprint.isNotBlank()) put("fingerprint", proxy.fingerprint)
-                if (proxy.alpn.isNotEmpty()) put("alpn", JSONArray(proxy.alpn))
-                if (proxy.cipherSuites.isNotBlank()) put("cipherSuites", proxy.cipherSuites)
+                if (effectiveFingerprint.isNotBlank()) put("fingerprint", effectiveFingerprint)
+                if (effectiveAlpn.isNotEmpty()) put("alpn", JSONArray(effectiveAlpn))
+                if (effectiveCipherSuites.isNotBlank()) put("cipherSuites", effectiveCipherSuites)
             })
             "reality" -> stream.put("realitySettings", JSONObject().apply {
                 put("serverName", proxy.effectiveSni())
-                if (proxy.fingerprint.isNotBlank()) put("fingerprint", proxy.fingerprint)
+                if (effectiveFingerprint.isNotBlank()) put("fingerprint", effectiveFingerprint)
                 if (proxy.publicKey.isNotBlank()) put("publicKey", proxy.publicKey)
                 if (proxy.shortId.isNotBlank()) put("shortId", proxy.shortId)
-                if (proxy.cipherSuites.isNotBlank()) put("cipherSuites", proxy.cipherSuites)
+                if (effectiveCipherSuites.isNotBlank()) put("cipherSuites", effectiveCipherSuites)
             })
         }
 
@@ -269,12 +294,31 @@ object XrayConfigBuilder {
                 if (host.isNotBlank()) put("host", host)
                 if (proxy.mode.isNotBlank()) put("mode", proxy.mode)
             })
+            "http", "h2" -> stream.put("httpSettings", JSONObject().apply {
+                put("path", proxy.path.ifBlank { "/" })
+                val host = proxy.hostHeader.ifBlank { proxy.effectiveSni() }
+                if (host.isNotBlank()) put("host", JSONArray(listOf(host)))
+            })
         }
 
+        val sockopt = JSONObject()
         if (proxy.dialMode.isNotBlank()) {
-            stream.put("sockopt", JSONObject().apply {
-                put("dialMode", proxy.dialMode)
-            })
+            sockopt.put("dialMode", proxy.dialMode)
+        }
+        if (antiDpi != null && antiDpi.enabled) {
+            runCatching {
+                val fmObj = JSONObject(antiDpi.finalmask)
+                sockopt.put("finalmask", fmObj)
+            }.onFailure {
+                sockopt.put("fragment", JSONObject().apply {
+                    put("packets", "tlshello")
+                    put("length", "100-200")
+                    put("interval", "1-2")
+                })
+            }
+        }
+        if (sockopt.length() > 0) {
+            stream.put("sockopt", sockopt)
         }
 
         return stream
