@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Shield
@@ -93,17 +94,36 @@ import com.ahoura.asha_scanner_ip.ui.components.ConfigManagerBottomSheet
 import com.ahoura.asha_scanner_ip.ui.components.CyberAppBar
 import com.ahoura.asha_scanner_ip.ui.components.CyberCard
 import com.ahoura.asha_scanner_ip.ui.components.CyberToggle
+import com.ahoura.asha_scanner_ip.ui.components.ExpandableCyberCard
 import com.ahoura.asha_scanner_ip.ui.components.KvInput
+import com.ahoura.asha_scanner_ip.ui.components.LivePathButton
+import com.ahoura.asha_scanner_ip.ui.components.LivePathDialog
+import com.ahoura.asha_scanner_ip.ui.components.LiveTelemetryBottomSheet
+import com.ahoura.asha_scanner_ip.ui.components.CyberHaptics
+import com.ahoura.asha_scanner_ip.ui.components.CyberTrafficHopHud
+import com.ahoura.asha_scanner_ip.ui.components.CyberTrafficOscilloscope
+import com.ahoura.asha_scanner_ip.ui.components.HumanLatencyPill
 import com.ahoura.asha_scanner_ip.ui.components.LottieSonar
 import com.ahoura.asha_scanner_ip.ui.components.Pill
 import com.ahoura.asha_scanner_ip.ui.components.SectionLabel
+import com.ahoura.asha_scanner_ip.ui.components.SegmentedModeSelector
 import com.ahoura.asha_scanner_ip.ui.components.ZeroTrustBottomSheet
-import com.ahoura.asha_scanner_ip.ui.components.LivePathButton
-import com.ahoura.asha_scanner_ip.ui.components.LivePathDialog
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalHapticFeedback
 import com.ahoura.asha_scanner_ip.ui.i18n.Lang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
 import com.ahoura.asha_scanner_ip.ui.i18n.localizeDigits
+import com.ahoura.asha_scanner_ip.ui.i18n.stringsFor
 import com.ahoura.asha_scanner_ip.ui.theme.Accent
 import com.ahoura.asha_scanner_ip.ui.theme.AccentBorder
 import com.ahoura.asha_scanner_ip.ui.theme.AccentDim
@@ -160,6 +180,7 @@ fun VpnScreen(
     val lang = LocalLang.current
     val fa = lang == Lang.FA
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
 
     var showMtuOptimizerDialog by remember { mutableStateOf(false) }
     var mtuTesting by remember { mutableStateOf(false) }
@@ -200,6 +221,7 @@ fun VpnScreen(
     var showPsiphonCountryDialog by remember { mutableStateOf(false) }
     var showTorCountryDialog by remember { mutableStateOf(false) }
     var showLivePathDialog by remember { mutableStateOf(false) }
+    var showTelemetrySheet by remember { mutableStateOf(false) }
     var pendingConnect by remember { mutableStateOf(false) }
 
     val quicBlock by vm.guardQuicBlock.collectAsState()
@@ -323,49 +345,167 @@ fun VpnScreen(
         ) {
             Spacer(Modifier.size(2.dp))
 
-            // ---- Transport Rail Chips ----
-            val transports = listOf(
-                "pow" to s.transportPow,
-                "masque" to s.transportMasque,
-                "wom" to s.transportWom,
-                "wireguard" to s.transportWireguard,
-                "gool" to s.transportGool,
-                "psiphon" to s.transportPsiphon,
-                "tor" to s.transportTor,
-                "shard" to s.transportShard,
-                "custom" to s.transportCustom,
+            // ---- Mode Selector (Smart Auto vs Manual Protocols) ----
+            var isSmartMode by remember { mutableStateOf(selectedTransport in listOf("pow", "masque", "shard")) }
+
+            SegmentedModeSelector(
+                options = listOf(
+                    true to "⚡ ${s.vpnModeSmart}",
+                    false to "🛠 ${s.vpnModeManual}",
+                ),
+                selected = isSmartMode,
+                onSelect = { smart ->
+                    isSmartMode = smart
+                    if (smart && selectedTransport !in listOf("pow", "masque", "shard")) {
+                        vm.setSelectedTransport("pow")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
             )
 
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                transports.forEach { (proto, label) ->
-                    val isSelected = selectedTransport == proto
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (isSelected) AccentMuted else SurfaceC)
-                            .border(
-                                1.dp,
-                                if (isSelected) Accent else BorderC,
-                                RoundedCornerShape(6.dp)
+            if (isSmartMode) {
+                // 3 Quick 1-Tap Smart Presets
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val presets = listOf(
+                        "pow" to "⚡ PoW",
+                        "masque" to "🚀 MASQUE",
+                        "shard" to "🛡️ SHARD",
+                    )
+                    presets.forEach { (proto, label) ->
+                        val isSelected = selectedTransport == proto
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isSelected) Accent.copy(alpha = 0.15f) else SurfaceC)
+                                .border(
+                                    1.dp,
+                                    if (isSelected) Accent else BorderC,
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .clickable {
+                                    CyberHaptics.click(haptic)
+                                    vm.setSelectedTransport(proto)
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (isSelected) Accent else TextSecondaryC,
+                                fontFamily = displayFamily(lang),
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 11.sp,
                             )
-                            .clickable {
-                                vm.setSelectedTransport(proto)
-                            }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            label,
-                            color = if (isSelected) Accent else TextSecondaryC,
-                            fontFamily = if (fa) Vazirmatn else ShareTechMono,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            fontSize = 12.sp,
+                        }
+                    }
+                }
+
+                // Preset Description Card
+                val presetIcon = when (selectedTransport) {
+                    "masque" -> Icons.Filled.Bolt
+                    "shard" -> Icons.Filled.Hub
+                    else -> Icons.Filled.Shield
+                }
+                val presetColor = when (selectedTransport) {
+                    "masque" -> BlueC
+                    "shard" -> OrangeC
+                    else -> Accent
+                }
+                val presetTitle = when (selectedTransport) {
+                    "masque" -> s.smartModePresetMasque
+                    "shard" -> s.smartModePresetShard
+                    else -> s.smartModePresetPow
+                }
+                val presetDesc = when (selectedTransport) {
+                    "masque" -> s.smartModePresetMasqueDesc
+                    "shard" -> s.smartModePresetShardDesc
+                    else -> s.smartModePresetPowDesc
+                }
+
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(presetColor.copy(alpha = 0.08f))
+                        .border(0.5.dp, presetColor.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            presetIcon,
+                            null,
+                            tint = presetColor,
+                            modifier = Modifier.size(22.dp)
                         )
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = presetTitle,
+                                color = presetColor,
+                                fontFamily = displayFamily(lang),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = presetDesc,
+                                color = TextPrimaryC,
+                                fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                            )
+                        }
+                    }
+                }
+            } else {
+                // ---- Manual Transport Rail Chips ----
+                val transports = listOf(
+                    "pow" to s.transportPow,
+                    "masque" to s.transportMasque,
+                    "wom" to s.transportWom,
+                    "wireguard" to s.transportWireguard,
+                    "gool" to s.transportGool,
+                    "psiphon" to s.transportPsiphon,
+                    "tor" to s.transportTor,
+                    "shard" to s.transportShard,
+                    "custom" to s.transportCustom,
+                )
+
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    transports.forEach { (proto, label) ->
+                        val isSelected = selectedTransport == proto
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isSelected) AccentMuted else SurfaceC)
+                                .border(
+                                    1.dp,
+                                    if (isSelected) Accent else BorderC,
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .clickable {
+                                    vm.setSelectedTransport(proto)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                label,
+                                color = if (isSelected) Accent else TextSecondaryC,
+                                fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 12.sp,
+                            )
+                        }
                     }
                 }
             }
@@ -387,7 +527,7 @@ fun VpnScreen(
                 VpnStatus.CONNECTED -> s.connected
                 VpnStatus.CONNECTING -> s.connecting
                 VpnStatus.DISCONNECTING -> s.connecting
-                VpnStatus.ERROR -> vpnStats.errorMessage ?: "ERROR"
+                VpnStatus.ERROR -> vpnStats.errorMessage?.let { humanizeConnectionError(it, fa) } ?: "ERROR"
                 VpnStatus.DISCONNECTED -> s.disconnected
             }
 
@@ -403,23 +543,28 @@ fun VpnScreen(
                             }
                             Spacer(Modifier.size(4.dp))
                             Text(
-                                vpnStats.errorMessage ?: "Unknown error",
+                                vpnStats.errorMessage?.let { humanizeConnectionError(it, fa) } ?: "Unknown error",
                                 color = TextPrimaryC,
-                                fontFamily = ShareTechMono,
-                                fontSize = 11.sp,
-                                lineHeight = 15.sp,
+                                fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
                             )
-                            vpnStats.detailMessage?.let { detail ->
-                                if (detail.isNotBlank() && detail != vpnStats.errorMessage) {
-                                    Spacer(Modifier.size(4.dp))
-                                    Text(
-                                        detail.take(300),
-                                        color = TextSecondaryC,
-                                        fontFamily = ShareTechMono,
-                                        fontSize = 9.sp,
-                                        lineHeight = 12.sp,
-                                    )
-                                }
+                            Spacer(Modifier.size(8.dp))
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(RedC.copy(alpha = 0.12f))
+                                    .border(0.5.dp, RedC.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                                    .clickable { showTelemetrySheet = true }
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "[ >_ " + (if (fa) "مشاهده گزارش فنی خطا" else "Inspect Technical Trace") + " ]",
+                                    color = RedC,
+                                    fontFamily = ShareTechMono,
+                                    fontSize = 10.sp,
+                                )
                             }
                         }
                     }
@@ -436,23 +581,14 @@ fun VpnScreen(
                     // Detail status line from native engine or Tor poller
                     vpnStats.detailMessage?.let { detail ->
                         if (detail.isNotBlank() && vpnStats.status != VpnStatus.DISCONNECTED) {
-                            val localizedDetail = when {
-                                detail.contains("Retrieving identity", ignoreCase = true) ->
-                                    if (fa) "در حال دریافت کلید، لطفاً چند ثانیه صبر کنید..." else "Retrieving identity, please wait..."
-                                detail.contains("Scanning gateways", ignoreCase = true) ->
-                                    if (fa) "در حال اسکن درگاه‌ها..." else "Scanning gateways…"
-                                detail.contains("Starting", ignoreCase = true) && detail.contains("…") ->
-                                    if (fa) "در حال شروع اتصال..." else detail
-                                detail.contains("Finding a fast node", ignoreCase = true) ->
-                                    if (fa) "یافتن سریع‌ترین سرور..." else detail
-                                else -> detail
-                            }
+                            val localizedDetail = humanizeConnectionDetail(detail, fa)
                             Spacer(Modifier.size(4.dp))
                             Text(
                                 localizedDetail,
                                 color = TextSecondaryC,
                                 fontFamily = if (fa) Vazirmatn else ShareTechMono,
                                 fontSize = 11.sp,
+                                maxLines = 2,
                             )
                         }
                     }
@@ -626,14 +762,65 @@ fun VpnScreen(
                 }
             }
 
-            // Live Path Quick Bar
-            Spacer(Modifier.size(8.dp))
-            LivePathButton(
-                vpnStats = vpnStats,
-                lang = lang,
+            val currentPing = vpnStats.pingMs ?: activeProfile?.pingMs
+            if (currentPing != null && currentPing > 0) {
+                HumanLatencyPill(
+                    latencyMs = currentPing,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // Live Traffic Waveform Oscilloscope
+            CyberTrafficOscilloscope(
+                isConnected = vpnStats.status.isConnected,
+                downloadBytesPerSec = vpnStats.downloadBps,
+                uploadBytesPerSec = vpnStats.uploadBps,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            // Cyber Traffic Hop-by-Hop Telemetry HUD
+            CyberTrafficHopHud(
+                isConnected = vpnStats.status.isConnected,
+                carrierName = vm.state.collectAsState().value.ispInfo.ifBlank { "Carrier" },
+                exitLocation = vpnStats.country?.let { IpFormatter.flag(it) + " " + it } ?: "🇩🇪 Germany",
                 onClick = { showLivePathDialog = true },
                 modifier = Modifier.fillMaxWidth()
             )
+
+            // Live Telemetry Console Launcher Button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(SurfaceC)
+                    .border(0.5.dp, BorderC, RoundedCornerShape(8.dp))
+                    .clickable {
+                        CyberHaptics.click(haptic)
+                        showTelemetrySheet = true
+                    }
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Terminal,
+                        contentDescription = null,
+                        tint = Accent,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = s.liveTelemetry,
+                        color = Accent,
+                        fontFamily = ShareTechMono,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
 
             // Live Geo & IP Leak Status Display
             if (checkingGeo) {
@@ -673,7 +860,83 @@ fun VpnScreen(
                 }
             }
 
-            // ---- Contextual Transport Settings Card ----
+            // ---- Everyday Essential Controls: Exit Location & Domestic Bypass ----
+            CyberCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Exit Country Picker
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                if (selectedTransport == "tor") showTorCountryDialog = true
+                                else showPsiphonCountryDialog = true
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BlueC.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.Place, null, tint = BlueC, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text(s.exitLocation, color = TextPrimaryC, fontFamily = displayFamily(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                val currentRegion = if (selectedTransport == "tor") torRegion else psiphonRegion
+                                val regionName = if (currentRegion == "auto") s.autoCountry else PsiphonRegions.label(currentRegion)
+                                Text(regionName, color = BlueC, fontFamily = if (fa) Vazirmatn else ShareTechMono, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Pill((if (selectedTransport == "tor") torRegion else psiphonRegion).uppercase())
+                    }
+
+                    HorizontalDivider(color = BorderC.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+                    // Domestic Iran Bypass Toggle
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Accent.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.Shield, null, tint = Accent, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text(s.smartSplit, color = TextPrimaryC, fontFamily = displayFamily(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(s.domesticBypassDescShort, color = TextMutedC, fontFamily = Vazirmatn, fontSize = 10.sp, lineHeight = 13.sp)
+                            }
+                        }
+                        CyberToggle(checked = bypassIr, onChange = { vm.setVpnBypassIr(it) })
+                    }
+                }
+            }
+
+            Spacer(Modifier.size(4.dp))
+
+            // ---- Expandable Advanced Tunnel & Anti-DPI Settings ----
+            ExpandableCyberCard(
+                title = s.advancedTunnelSettings,
+                subtitle = s.advancedTunnelSettingsDesc,
+                icon = Icons.Filled.Tune,
+                iconTint = Accent,
+                badgeText = "PRO",
+                initiallyExpanded = false,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    // ---- Contextual Transport Settings Card ----
             when (selectedTransport) {
                 "wireguard" -> {
                     SectionLabel(s.transportWireguard)
@@ -1620,6 +1883,8 @@ fun VpnScreen(
                     }
                 }
             }
+                }
+            }
 
             Spacer(Modifier.size(16.dp))
         }
@@ -1695,6 +1960,8 @@ fun VpnScreen(
                     }
                 }
             }
+
+            Spacer(Modifier.height(16.dp))
         }
 
         // Config Manager Bottom Sheet
@@ -1759,6 +2026,15 @@ fun VpnScreen(
             cleanIp = cleanCandidate,
             onDismissRequest = { showLivePathDialog = false },
         )
+
+        // Live Telemetry Console BottomSheet
+        if (showTelemetrySheet) {
+            LiveTelemetryBottomSheet(
+                vpnStats = vpnStats,
+                selectedTransport = selectedTransport,
+                onDismiss = { showTelemetrySheet = false }
+            )
+        }
     }
 }
 
@@ -1861,6 +2137,10 @@ private fun VpnPowerButton(
     status: VpnStatus,
     onClick: () -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
+    val lang = LocalLang.current
+    val fa = lang == Lang.FA
+    val s = stringsFor(lang)
     val isConnected = status == VpnStatus.CONNECTED
     val isConnecting = status == VpnStatus.CONNECTING || status == VpnStatus.DISCONNECTING
 
@@ -1868,76 +2148,258 @@ private fun VpnPowerButton(
         isConnected -> Accent
         isConnecting -> OrangeC
         status == VpnStatus.ERROR -> RedC
-        else -> RedC.copy(alpha = 0.8f)
+        else -> TextSecondaryC
     }
 
-    val transition = rememberInfiniteTransition(label = "power_spin")
-    val angle by transition.animateFloat(
+    val transition = rememberInfiniteTransition(label = "arc_reactor")
+    val dialAngle by transition.animateFloat(
         initialValue = 0f, targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(3000, easing = LinearEasing), RepeatMode.Restart),
-        label = "spin",
+        animationSpec = infiniteRepeatable(
+            animation = tween(if (isConnecting) 2400 else if (isConnected) 12000 else 45000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "dial_spin"
+    )
+    val orbitAngle by transition.animateFloat(
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(if (isConnecting) 1500 else 4500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "orbit_spin"
     )
     val pulse by transition.animateFloat(
-        initialValue = 0.85f, targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Reverse),
-        label = "pulse",
+        initialValue = 0.90f, targetValue = 1.12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(if (isConnecting) 800 else 1600, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
     )
 
-    Box(
-        Modifier
-            .size(170.dp)
-            .padding(10.dp),
-        contentAlignment = Alignment.Center,
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.92f else 1.0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "press_scale"
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        // Outer rotating neon dashed ring
-        if (isConnected || isConnecting) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { scaleX = pulse; scaleY = pulse }
-                    .rotate(angle)
-                    .clip(CircleShape)
-                    .border(
-                        1.5.dp,
-                        Brush.sweepGradient(listOf(primaryColor, Color.Transparent, primaryColor)),
-                        CircleShape
-                    )
-            )
-        }
-
-        // Middle aura
         Box(
             Modifier
-                .size(128.dp)
-                .clip(CircleShape)
-                .background(primaryColor.copy(alpha = if (isConnected) 0.12f else 0.05f))
-                .border(1.dp, primaryColor.copy(alpha = 0.4f), CircleShape)
-        )
-
-        // Inner Power button circle
-        Box(
-            Modifier
-                .size(96.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        listOf(
-                            primaryColor.copy(alpha = if (isConnected) 0.35f else 0.15f),
-                            SurfaceC,
-                        )
-                    )
-                )
-                .border(1.5.dp, primaryColor, CircleShape)
-                .clickable(onClick = onClick),
+                .size(200.dp)
+                .padding(6.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                Icons.Filled.PowerSettingsNew,
-                contentDescription = "VPN Power",
-                tint = primaryColor,
-                modifier = Modifier.size(42.dp),
+            // Ambient breathing glow in connected or connecting mode
+            if (isConnected || isConnecting) {
+                Box(
+                    Modifier
+                        .size(190.dp)
+                        .graphicsLayer { scaleX = pulse; scaleY = pulse }
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                listOf(
+                                    primaryColor.copy(alpha = if (isConnected) 0.22f else 0.12f),
+                                    primaryColor.copy(alpha = 0.05f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+            }
+
+            // Canvas: 36 Stator Tick Marks + Orbiting Energy Flux Nodes
+            Canvas(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val outerRadius = size.width / 2f - 4.dp.toPx()
+                val innerRadiusMinor = outerRadius - 5.dp.toPx()
+                val innerRadiusMajor = outerRadius - 9.dp.toPx()
+
+                // Draw Stator Ticks (36 ticks at 10-degree increments)
+                for (i in 0 until 36) {
+                    val angleDeg = i * 10f + dialAngle
+                    val angleRad = Math.toRadians(angleDeg.toDouble())
+                    val isMajor = i % 3 == 0
+                    val innerR = if (isMajor) innerRadiusMajor else innerRadiusMinor
+                    val tickColor = if (isConnected) {
+                        if (isMajor) Accent else Accent.copy(alpha = 0.4f)
+                    } else if (isConnecting) {
+                        if (isMajor) OrangeC else OrangeC.copy(alpha = 0.35f)
+                    } else {
+                        if (isMajor) BorderC.copy(alpha = 0.7f) else BorderC.copy(alpha = 0.25f)
+                    }
+
+                    val startX = center.x + (innerR * kotlin.math.cos(angleRad)).toFloat()
+                    val startY = center.y + (innerR * kotlin.math.sin(angleRad)).toFloat()
+                    val endX = center.x + (outerRadius * kotlin.math.cos(angleRad)).toFloat()
+                    val endY = center.y + (outerRadius * kotlin.math.sin(angleRad)).toFloat()
+
+                    drawLine(
+                        color = tickColor,
+                        start = Offset(startX, startY),
+                        end = Offset(endX, endY),
+                        strokeWidth = (if (isMajor) 1.8.dp else 1.0.dp).toPx()
+                    )
+                }
+
+                // Middle Track Circle
+                val midTrackR = outerRadius - 15.dp.toPx()
+                drawCircle(
+                    color = primaryColor.copy(alpha = if (isConnected) 0.3f else 0.15f),
+                    radius = midTrackR,
+                    center = center,
+                    style = Stroke(width = 1.dp.toPx())
+                )
+
+                // Quantum Flux Orbiting Nodes (when connecting or connected)
+                if (isConnecting || isConnected) {
+                    val nodeCount = if (isConnecting) 3 else 4
+                    val stepDeg = 360f / nodeCount
+                    for (k in 0 until nodeCount) {
+                        val nDeg = orbitAngle + k * stepDeg
+                        val nRad = Math.toRadians(nDeg.toDouble())
+                        val nx = center.x + (midTrackR * kotlin.math.cos(nRad)).toFloat()
+                        val ny = center.y + (midTrackR * kotlin.math.sin(nRad)).toFloat()
+
+                        // Halo glow
+                        drawCircle(
+                            color = primaryColor.copy(alpha = 0.35f),
+                            radius = 5.dp.toPx(),
+                            center = Offset(nx, ny)
+                        )
+                        // Solid core
+                        drawCircle(
+                            color = primaryColor,
+                            radius = 2.5.dp.toPx(),
+                            center = Offset(nx, ny)
+                        )
+                    }
+                }
+            }
+
+            // Inner Stator Aura Circle
+            Box(
+                Modifier
+                    .size(136.dp)
+                    .clip(CircleShape)
+                    .background(primaryColor.copy(alpha = if (isConnected) 0.10f else 0.04f))
+                    .border(1.dp, primaryColor.copy(alpha = if (isConnected) 0.45f else 0.20f), CircleShape)
+            )
+
+            // Mechanical Arc Reactor Power Core Button
+            Box(
+                Modifier
+                    .size(100.dp)
+                    .scale(pressScale)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(
+                                primaryColor.copy(alpha = if (isConnected) 0.35f else 0.12f),
+                                SurfaceC,
+                            )
+                        )
+                    )
+                    .border(2.dp, primaryColor, CircleShape)
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = {
+                            CyberHaptics.click(haptic)
+                            onClick()
+                        }
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.PowerSettingsNew,
+                    contentDescription = "VPN Power",
+                    tint = primaryColor,
+                    modifier = Modifier.size(46.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        // Reactor status micro-pill
+        val reactorText = when {
+            isConnected -> s.arcReactorSecured
+            isConnecting -> s.arcReactorConnecting
+            else -> s.arcReactorReady
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Box(
+                Modifier
+                    .size(5.dp)
+                    .clip(CircleShape)
+                    .background(primaryColor)
+            )
+            Text(
+                text = reactorText,
+                color = primaryColor,
+                fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = if (fa) 0.sp else 0.5.sp
             )
         }
+    }
+}
+
+private fun humanizeConnectionDetail(detail: String, fa: Boolean): String {
+    val lower = detail.lowercase()
+    return when {
+        lower.contains("retrieving identity") || lower.contains("retrieving key") ->
+            if (fa) "در حال دریافت و تایید کلید رمزنگاری..." else "Retrieving cryptographic identity…"
+        lower.contains("scanning gateways") || lower.contains("finding clean") ->
+            if (fa) "در حال بررسی و یافتن سریع‌ترین درگاه کلودفلر..." else "Scanning for cleanest Cloudflare gateway…"
+        lower.contains("masque tunnel ended") || lower.contains("reconnecting") ->
+            if (fa) "درگاه قبلی مسدود شد؛ سوئیچ هوشمند به درگاه پایدار بعدی..." else "Gateway unresponsive; switching to backup gateway…"
+        lower.contains("h2 connect-ip status 400") || lower.contains("connect-ip status") ->
+            if (fa) "در حال تغییر پروتکل متناسب با اپراتور اینترنت..." else "Adapting protocol for current carrier…"
+        lower.contains("udp/1701 did not answer") || lower.contains("trying tcp") ->
+            if (fa) "پورت UDP مسدود است؛ تغییر خودکار به کانال ضد فیلتر TCP..." else "UDP blocked; auto-switching to anti-censorship TCP…"
+        lower.contains("new certificate") ->
+            if (fa) "صدور کلید امن جدید و برقراری ارتباط مجدد..." else "New secure cert issued; re-verifying gateway…"
+        lower.contains("starting") && lower.contains("…") ->
+            if (fa) "در حال راه‌اندازی تونل امن..." else detail
+        lower.contains("finding a fast node") ->
+            if (fa) "یافتن سریع‌ترین سرور خروجی..." else "Selecting fastest exit node…"
+        lower.contains("no clean endpoint") || lower.contains("clean list empty") ->
+            if (fa) "در حال اسکن فرکانس‌های جایگزین کلودفلر..." else "Scanning alternative Cloudflare IP ranges…"
+        lower.contains("timeout") || lower.contains("timed out") ->
+            if (fa) "تاخیر در پاسخ؛ در حال برقراری کانال موازی..." else "High latency detected; establishing parallel route…"
+        lower.contains("connection reset") || lower.contains("broken pipe") ->
+            if (fa) "اختلال موقت شبکه؛ بازیابی خودکار تونل..." else "Temporary packet disruption; auto-recovering…"
+        else -> detail
+    }
+}
+
+private fun humanizeConnectionError(error: String, fa: Boolean): String {
+    val lower = error.lowercase()
+    return when {
+        lower.contains("no clean endpoint") ->
+            if (fa) "ارتباط با درگاه‌های کلودفلر به دلیل اختلال شدید اینترنت برقرار نشد. حالت Asha PoW را امتحان کنید یا مجدداً دکمه اتصال را بزنید."
+            else "Could not reach clean Cloudflare endpoints due to network censorship. Please retry or switch to Asha PoW mode."
+        lower.contains("timeout") || lower.contains("timed out") ->
+            if (fa) "زمان پاسخگویی شبکه به پایان رسید. لطفاً اتصال اینترنت گوشی خود را بررسی کنید یا مجدداً تلاش کنید."
+            else "Connection timed out. Please check your network or try connecting again."
+        lower.contains("refused") || lower.contains("reset") ->
+            if (fa) "درگاه توسط اپراتور مسدود شد. در تلاش بعدی درگاه جایگزین انتخاب خواهد شد."
+            else "Connection refused by carrier. An alternative gateway will be chosen on retry."
+        else -> error
     }
 }
 
@@ -2018,6 +2480,30 @@ private fun mapStepToCopy(raw: String, s: AppStrings, fa: Boolean): Pair<String,
         }
         text.startsWith("Asha PoW ready") || text.startsWith("Connection established") -> {
             s.connectionEstablished to ""
+        }
+        text.startsWith("Starting Asha PoW") -> {
+            (if (fa) "راه‌اندازی Asha PoW…" else "Starting Asha PoW…") to ""
+        }
+        text.startsWith("Tunnel did not stay up") -> {
+            val addr = text.substringAfter(" on ", "")
+                .substringBefore(" That address")
+                .substringBefore(". That")
+                .trim()
+                .trimEnd('.')
+            (if (fa) "تغییر آدرس سرور به دلیل اختلال" else "Switching gateway address") to addr
+        }
+        text.startsWith("Every saved address failed") -> {
+            (if (fa) "تلاش برای یافتن سرور جایگزین…" else "Searching for alternative gateway…") to ""
+        }
+        text.startsWith("UDP/1701 did not") -> {
+            (if (fa) "عدم پاسخگویی پورت UDP" else "UDP port not responding") to ""
+        }
+        text.contains("did not connect") -> {
+            val proto = text.substringBefore(" did not connect").trim()
+            (if (fa) "عدم پاسخگویی لایه $proto" else "$proto did not respond") to ""
+        }
+        text.startsWith("No WARP transport could carry") -> {
+            (if (fa) "عدم اتصال به لایه‌های ارتباطی؛ تلاش مجدد…" else "No transport reachable; retrying…") to ""
         }
         text.startsWith("Connecting ") -> {
             (if (fa) "اتصال به لایه " else "Connecting ") + text.removePrefix("Connecting ").trim().trimEnd('…') to ""
@@ -2154,6 +2640,7 @@ private fun ConnectionStepRow(row: StepDisplayRow, fa: Boolean, lang: Lang) {
                     when (row.state) {
                         StepState.DONE -> Accent.copy(alpha = 0.12f)
                         StepState.FAILED -> RedC.copy(alpha = 0.12f)
+                        StepState.RETRYING -> OrangeC.copy(alpha = 0.15f)
                         StepState.RUNNING -> Color.Transparent
                     }
                 ),
@@ -2172,6 +2659,20 @@ private fun ConnectionStepRow(row: StepDisplayRow, fa: Boolean, lang: Lang) {
                     tint = RedC,
                     modifier = Modifier.size(11.dp),
                 )
+                StepState.RETRYING -> {
+                    val spinTransition = rememberInfiniteTransition(label = "retry_spin")
+                    val spinAngle by spinTransition.animateFloat(
+                        initialValue = 0f, targetValue = 360f,
+                        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Restart),
+                        label = "spin_retry"
+                    )
+                    Icon(
+                        Icons.Default.Tune,
+                        contentDescription = null,
+                        tint = OrangeC,
+                        modifier = Modifier.size(11.dp).rotate(spinAngle),
+                    )
+                }
                 StepState.RUNNING -> CircularProgressIndicator(
                     color = Accent,
                     trackColor = AccentMuted,
@@ -2190,22 +2691,52 @@ private fun ConnectionStepRow(row: StepDisplayRow, fa: Boolean, lang: Lang) {
             } else {
                 row.title
             }
-            Text(
-                text = titleText.localizeDigits(lang),
-                color = when (row.state) {
-                    StepState.DONE -> TextPrimaryC
-                    StepState.FAILED -> TextSecondaryC
-                    StepState.RUNNING -> Accent
-                },
-                fontFamily = displayFamily(lang),
-                fontSize = 11.sp,
-                fontWeight = if (row.state == StepState.RUNNING) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 2,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = titleText.localizeDigits(lang),
+                    color = when (row.state) {
+                        StepState.DONE -> TextPrimaryC
+                        StepState.FAILED -> TextSecondaryC
+                        StepState.RETRYING -> OrangeC
+                        StepState.RUNNING -> Accent
+                    },
+                    fontFamily = displayFamily(lang),
+                    fontSize = 11.sp,
+                    fontWeight = if (row.state == StepState.RUNNING || row.state == StepState.RETRYING) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 2,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+
+                if (row.state == StepState.RETRYING) {
+                    val s = stringsFor(lang)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(OrangeC.copy(alpha = 0.12f))
+                            .border(0.5.dp, OrangeC.copy(alpha = 0.45f), RoundedCornerShape(3.dp))
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = s.stepRetryingTag,
+                            color = OrangeC,
+                            fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
             if (row.detail.isNotBlank()) {
                 Text(
                     text = row.detail,
-                    color = if (row.state == StepState.FAILED) RedC.copy(alpha = 0.8f) else TextMutedC,
+                    color = when (row.state) {
+                        StepState.FAILED -> RedC.copy(alpha = 0.8f)
+                        StepState.RETRYING -> OrangeC.copy(alpha = 0.85f)
+                        else -> TextMutedC
+                    },
                     fontFamily = ShareTechMono,
                     fontSize = 10.sp,
                     maxLines = 1,

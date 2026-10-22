@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import com.ahoura.asha_scanner_ip.core.model.ScanConfig
 import com.ahoura.asha_scanner_ip.ui.ScanViewModel
 import com.ahoura.asha_scanner_ip.ui.components.CyberAppBar
+import com.ahoura.asha_scanner_ip.ui.components.ExpandableCyberCard
 import com.ahoura.asha_scanner_ip.ui.components.KvInput
 import com.ahoura.asha_scanner_ip.ui.components.Pill
 import com.ahoura.asha_scanner_ip.ui.components.PresetRow
@@ -112,7 +113,6 @@ fun ScanSettings(vm: ScanViewModel, cfg: ScanConfig, showAdvancedDefault: Boolea
     val state by vm.state.collectAsState()
     val s = LocalStrings.current
     val lang = LocalLang.current
-    var advanced by remember { mutableStateOf(showAdvancedDefault) }
 
     var customCount by remember(cfg.tier) { mutableStateOf(false) }
     var customWorkers by remember(cfg.tier) { mutableStateOf(false) }
@@ -159,10 +159,18 @@ fun ScanSettings(vm: ScanViewModel, cfg: ScanConfig, showAdvancedDefault: Boolea
     SectionLabel(s.mode)
     TierSelector(selected = cfg.tier, onSelect = vm::setTier)
 
-    // ==========================================
-    // 02 / TARGETS & IP POOL
-    // ==========================================
-    CyberSectionHeader(s.secTargets)
+    Spacer(Modifier.height(10.dp))
+
+    ExpandableCyberCard(
+        title = s.advancedOptions,
+        subtitle = if (lang == Lang.FA) "اهداف دستی، دور زدن DPI، پورت‌ها و تنظیمات دقیق" else "Custom targets, anti-DPI, ports & fine-tuning",
+        initiallyExpanded = showAdvancedDefault,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // ==========================================
+            // 02 / TARGETS & IP POOL
+            // ==========================================
+            CyberSectionHeader(s.secTargets)
 
     KvInput(
         label = s.pastedTargetsTitle,
@@ -466,18 +474,7 @@ fun ScanSettings(vm: ScanViewModel, cfg: ScanConfig, showAdvancedDefault: Boolea
         }, keyboardType = KeyboardType.Number)
     }
 
-    Spacer(Modifier.size(10.dp))
-    Row(
-        Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        SectionLabel(s.advancedOptions)
-        Spacer(Modifier.weight(1f))
-        Text(if (advanced) "—" else "+", color = Accent, fontFamily = ShareTechMono, fontSize = 14.sp)
-    }
-
-    if (advanced) {
-        Spacer(Modifier.size(4.dp))
+        Spacer(Modifier.size(8.dp))
         SectionLabel(s.mode)
         PresetRow(
             options = listOf("TCP", "TLS", "HTTP"),
@@ -557,6 +554,7 @@ fun ScanSettings(vm: ScanViewModel, cfg: ScanConfig, showAdvancedDefault: Boolea
                 }
                 ToggleSwitch(cfg.fallbackToDomains) { v -> vm.updateScanConfig { it.copy(fallbackToDomains = v) } }
             }
+        }
         }
     }
 }

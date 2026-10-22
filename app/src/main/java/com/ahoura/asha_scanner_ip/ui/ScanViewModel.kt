@@ -420,7 +420,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             setManualEndpoint(formatted)
             context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
                 .edit().putString("clean_ip", cleanIp.trim()).apply()
-            com.ahoura.asha_scanner_ip.core.guard.CoreConfig.syncCleanH2Peers(context, listOf(formatted))
+            com.ahoura.asha_scanner_ip.core.guard.CoreConfig.ensureCleanH2Peers(context, listOf(formatted))
             setSelectedTransport(transport)
             startVpnTransport(context, transport)
         }
@@ -1271,14 +1271,21 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                     subServer.updateResults(p.best, proxy)
                     if (p.best.isNotEmpty()) {
                         val topIp = p.best.first().ip
-                        getApplication<android.app.Application>()
-                            .getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-                            .edit().putString("clean_ip", topIp).apply()
-                        val topPeers = p.best.take(5).map { it.ip }
-                        com.ahoura.asha_scanner_ip.core.guard.CoreConfig.syncCleanH2Peers(
-                            getApplication(),
-                            topPeers
-                        )
+                        val isWarp = com.ahoura.asha_scanner_ip.core.guard.CoreConfig.isWarpEndpoint(topIp)
+                        if (isWarp) {
+                            getApplication<android.app.Application>()
+                                .getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+                                .edit().putString("clean_ip", topIp).apply()
+                        }
+                        val warpPeers = p.best.map { it.ip }.filter {
+                            com.ahoura.asha_scanner_ip.core.guard.CoreConfig.isWarpEndpoint(it)
+                        }.take(5)
+                        if (warpPeers.isNotEmpty()) {
+                            com.ahoura.asha_scanner_ip.core.guard.CoreConfig.ensureCleanH2Peers(
+                                getApplication(),
+                                warpPeers
+                            )
+                        }
                     }
                 }
             } catch (_: Throwable) {
@@ -1357,8 +1364,14 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     fun startVpnTransport(context: android.content.Context, transport: String) {
         setSelectedTransport(transport)
-        val cleanIp = _state.value.progress.best.firstOrNull()?.ip
+        val isWarpTransport = transport.lowercase() in listOf("pow", "masque", "mim", "gool", "wireguard", "wom")
+        val rawCandidate = _state.value.progress.best.firstOrNull()?.ip
             ?: context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).getString("clean_ip", null)?.trim()
+        val cleanIp = if (isWarpTransport) {
+            rawCandidate?.takeIf { com.ahoura.asha_scanner_ip.core.guard.CoreConfig.isWarpEndpoint(it) }
+        } else {
+            rawCandidate
+        }
         val isChained = when (transport.lowercase()) {
             "pow" -> true
             "psiphon" -> psiphonChained.value

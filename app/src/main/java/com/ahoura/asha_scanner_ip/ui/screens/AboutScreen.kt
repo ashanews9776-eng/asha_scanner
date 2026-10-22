@@ -11,11 +11,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -57,7 +60,13 @@ fun AboutScreen(onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         CyberAppBar(title = s.about, onBack = onBack)
-        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Spacer(Modifier.size(8.dp))
             Text("ASHA SCANNER", color = Accent, fontFamily = ShareTechMono, fontSize = 16.sp, letterSpacing = 2.sp)
             Pill("v${BuildConfig.VERSION_NAME} · IR-OPTIMIZED")
@@ -68,7 +77,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 fontSize = 12.sp, lineHeight = if (lang == Lang.FA) 20.sp else 18.sp,
             )
 
-            LinkRow(Icons.Filled.Send, BlueC, s.telegram, TELEGRAM_HANDLE) { open(TELEGRAM_URL) }
+            LinkRow(Icons.AutoMirrored.Filled.Send, BlueC, s.telegram, TELEGRAM_HANDLE) { open(TELEGRAM_URL) }
 
             CyberCard(Modifier.fillMaxWidth()) {
                 Column {
@@ -83,6 +92,8 @@ fun AboutScreen(onBack: () -> Unit) {
                     Text("MIT", color = TextPrimaryC, fontFamily = ShareTechMono, fontSize = 13.sp)
                 }
             }
+
+            Spacer(Modifier.height(16.dp))
         }
     }
 }

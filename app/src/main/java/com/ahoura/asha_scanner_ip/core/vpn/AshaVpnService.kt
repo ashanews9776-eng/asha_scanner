@@ -11,6 +11,7 @@ import com.ahoura.asha_scanner_ip.core.storm.StormDnsProcessManager
 import com.ahoura.asha_scanner_ip.core.validator.XrayConfigBuilder
 import com.ahoura.asha_scanner_ip.core.validator.XrayProcessManager
 import com.ahoura.asha_scanner_ip.data.SettingsStore
+import com.ahoura.asha_scanner_ip.core.guard.AshaCarrier
 import com.ahoura.asha_scanner_ip.core.guard.CoreConfig
 import com.ahoura.asha_scanner_ip.core.guard.GuardVpnService
 import com.ahoura.asha_scanner_ip.core.guard.MtuConfig
@@ -75,7 +76,9 @@ class AshaVpnService : GuardVpnService() {
                         prefs.edit().putString("default_protocol", transport).apply()
 
                         if (!cleanIp.isNullOrBlank()) {
-                            prefs.edit().putString("clean_ip", cleanIp.trim()).apply()
+                            if (CoreConfig.isWarpEndpoint(cleanIp) && !cleanIp.contains("192.0.54.") && !cleanIp.contains("192.0.63.")) {
+                                prefs.edit().putString("clean_ip", cleanIp.trim()).apply()
+                            }
                         }
 
                         val isPow = transport == "pow"
@@ -124,22 +127,35 @@ class AshaVpnService : GuardVpnService() {
                         // Aether v2.3.0: Configure AETHER_ENROLL_ADDRESS for direct WARP API key acquisition & registration
                         val manualEndpoint = prefs.getString("manual_endpoint", null)?.trim().orEmpty()
                         val storedCleanIp = prefs.getString("clean_ip", null)?.trim().orEmpty()
-                        val rawCleanIp = manualEndpoint.takeIf { it.isNotBlank() }
+                        val rawCleanCandidate = manualEndpoint.takeIf { it.isNotBlank() }
                             ?: cleanIp?.trim()?.takeIf { it.isNotBlank() }
                             ?: storedCleanIp.takeIf { it.isNotBlank() }
-
-                        val masquePeer = if (rawCleanIp != null) CoreConfig.formatPeerForProtocol(rawCleanIp, "masque") else null
-                        val wgPeer = if (rawCleanIp != null) CoreConfig.formatPeerForProtocol(rawCleanIp, "wireguard") else null
-                        val chosenEnrollIp = if (effectiveProto.lowercase() in listOf("masque", "mim", "wom", "wg-over-masque")) masquePeer else wgPeer
-
-                        if (masquePeer != null) {
-                            CoreConfig.syncCleanH2Peers(this, listOf(masquePeer))
+                        val rawCleanIp = if (!rawCleanCandidate.isNullOrBlank() &&
+                            CoreConfig.isWarpEndpoint(rawCleanCandidate) &&
+                            !rawCleanCandidate.contains("192.0.54.") &&
+                            !rawCleanCandidate.contains("192.0.63.")) {
+                            rawCleanCandidate
+                        } else {
+                            CoreConfig.DEFAULT_CLEAN_H2_PEERS.first()
                         }
 
-                        val enrollHost = if (manualEndpoint.isNotBlank()) {
+                        val isChained = (transport == "psiphon" && armed) ||
+                            (transport == "tor" && TorManager.chainArmed(this)) ||
+                            effectiveProto.contains("chain") ||
+                            effectiveProto.contains("psiphon-over-warp")
+
+                        val isManual = manualEndpoint.isNotBlank() && CoreConfig.isWarpEndpoint(manualEndpoint)
+                        val targetCleanOverride = if (isManual) manualEndpoint else rawCleanCandidate?.takeIf { CoreConfig.isWarpEndpoint(it) }
+                        val chosenEnrollIp = targetCleanOverride?.let { CoreConfig.formatPeerForProtocol(it, effectiveProto) }
+                        val extraPeers = listOfNotNull(
+                            rawCleanCandidate?.takeIf { CoreConfig.isWarpEndpoint(it) }?.let { CoreConfig.formatPeerForProtocol(it, "masque") }
+                        )
+                        CoreConfig.ensureCleanH2Peers(this, extraPeers)
+
+                        val enrollHost = if (isManual) {
                             manualEndpoint.removeSurrounding("[", "]").substringBefore(":")
-                        } else if (rawCleanIp != null) {
-                            rawCleanIp.removeSurrounding("[", "]").substringBefore(":")
+                        } else if (!rawCleanCandidate.isNullOrBlank() && CoreConfig.isWarpEndpoint(rawCleanCandidate)) {
+                            rawCleanCandidate.removeSurrounding("[", "]").substringBefore(":")
                         } else {
                             "162.159.192.1"
                         }
@@ -153,10 +169,6 @@ class AshaVpnService : GuardVpnService() {
                             runCatching { android.system.Os.unsetenv("AETHER_ECH") }
                         }
 
-                        val isChained = (transport == "psiphon" && armed) ||
-                            (transport == "tor" && TorManager.chainArmed(this)) ||
-                            effectiveProto.contains("chain") ||
-                            effectiveProto.contains("psiphon-over-warp")
                         val isOuterWarp = effectiveProto.lowercase() in listOf("masque", "mim", "gool", "warp-in-warp", "wom", "wg-over-masque") || isChained
 
                         if (isOuterWarp) {
@@ -167,8 +179,14 @@ class AshaVpnService : GuardVpnService() {
                                 } else {
                                     android.system.Os.unsetenv("AETHER_MASQUE_HTTP2")
                                 }
-                                android.system.Os.setenv("AETHER_MASQUE_H2_FRAGMENT", "1", true)
-                                android.system.Os.setenv("AETHER_API_FRAGMENT", "1", true)
+                                val isMci = AshaCarrier.isMci(this)
+                                if (isMci) {
+                                    android.system.Os.unsetenv("AETHER_MASQUE_H2_FRAGMENT")
+                                    android.system.Os.unsetenv("AETHER_API_FRAGMENT")
+                                } else {
+                                    android.system.Os.setenv("AETHER_MASQUE_H2_FRAGMENT", "1", true)
+                                    android.system.Os.setenv("AETHER_API_FRAGMENT", "1", true)
+                                }
                                 android.system.Os.setenv("AETHER_MASQUE_STARTUP_SECS", "35", true)
                                 android.system.Os.setenv("AETHER_MASQUE_VALIDATE_SECS", "15", true)
                                 android.system.Os.setenv("AETHER_WG_VALIDATE_SECS", "15", true)
@@ -177,13 +195,11 @@ class AshaVpnService : GuardVpnService() {
                                 android.system.Os.setenv("AETHER_MASQUE_H2_SOCKET_TUNING", "1", true)
                                 android.system.Os.setenv("AETHER_MASQUE_H2_SPEED_PICK", "1", true)
                                 android.system.Os.setenv("AETHER_QUIC_TUNED", "1", true)
-                                if (masquePeer != null || wgPeer != null) {
-                                    if (masquePeer != null) {
-                                        android.system.Os.setenv("AETHER_MASQUE_H2_PEER", masquePeer, true)
-                                        android.system.Os.setenv("AETHER_PEER", masquePeer, true)
-                                    }
-                                    if (wgPeer != null) {
-                                        android.system.Os.setenv("AETHER_WG_PEER", wgPeer, true)
+                                if (isManual) {
+                                    val manualPeer = CoreConfig.formatPeerForProtocol(manualEndpoint, "masque")
+                                    if (manualPeer != null) {
+                                        android.system.Os.setenv("AETHER_MASQUE_H2_PEER", manualPeer, true)
+                                        android.system.Os.setenv("AETHER_PEER", manualPeer, true)
                                     }
                                 } else {
                                     android.system.Os.unsetenv("AETHER_PEER")
@@ -195,6 +211,8 @@ class AshaVpnService : GuardVpnService() {
                             runCatching {
                                 android.system.Os.unsetenv("AETHER_MASQUE_HTTP2")
                                 android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER")
+                                val targetWg = if (isManual) manualEndpoint else rawCleanCandidate?.takeIf { CoreConfig.isWarpEndpoint(it) }
+                                val wgPeer = targetWg?.let { CoreConfig.formatPeerForProtocol(it, "wireguard") }
                                 if (wgPeer != null) {
                                     android.system.Os.setenv("AETHER_PEER", wgPeer, true)
                                     android.system.Os.setenv("AETHER_WG_PEER", wgPeer, true)

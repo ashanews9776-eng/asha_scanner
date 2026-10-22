@@ -156,13 +156,11 @@ object CoreConfig {
         }.trim()
 
         val warpPrefixes = listOf(
-            "162.159.", "188.114.", "104.16.", "104.17.", "104.18.", "104.19.", "104.20.",
-            "172.64.", "172.65.", "172.66.", "172.67.",
-            "2606:4700:"
+            "162.159.192.", "162.159.193.", "162.159.195.", "162.159.204.",
+            "162.159.196.", "162.159.197.", "162.159.198.", "162.159.199.",
+            "2606:4700:d0:", "2606:4700:d1:", "2606:4700:"
         )
-        return warpPrefixes.any { host.startsWith(it) } ||
-            host.matches(Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$""")) ||
-            host.contains(":")
+        return warpPrefixes.any { host.startsWith(it) }
     }
 
     /**
@@ -170,25 +168,47 @@ object CoreConfig {
      * pre-validated clean HTTP/2 endpoints to bypass prober scanning failures.
      */
     val DEFAULT_CLEAN_H2_PEERS = listOf(
-        "188.114.97.1:443",
-        "188.114.96.1:443",
+        "162.159.199.238:443",
+        "162.159.197.250:443",
         "162.159.192.1:443",
         "162.159.193.1:443",
         "162.159.195.1:443",
-        "172.67.182.1:443",
-        "104.16.132.229:443",
-        "104.17.150.1:443",
-        "104.21.32.1:443",
+        "162.159.204.1:443",
+        "162.159.198.1:443",
+        "162.159.199.1:443",
+        "162.159.192.2:443",
+        "162.159.193.2:443",
+        "162.159.195.2:443",
+        "162.159.204.2:443",
+        "162.159.198.2:443",
+        "162.159.199.2:443",
+        "[2606:4700:d0::a29f:c001]:443",
+        "[2606:4700:d1::a29f:c101]:443",
+        "188.114.97.1:443",
+        "188.114.96.1:443",
     )
 
     fun ensureCleanH2Peers(context: Context, extraPeers: List<String> = emptyList()) {
-        val existing = cleanH2Peers(context)
-        val savedCleanIp = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            .getString("clean_ip", null)?.trim()?.takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
-        val all = (extraPeers + savedCleanIp + existing + DEFAULT_CLEAN_H2_PEERS)
+        val existing = cleanH2Peers(context).filter { isWarpEndpoint(it) }
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val savedCleanIp = prefs.getString("clean_ip", null)?.trim()?.takeIf { isWarpEndpoint(it) }?.let { listOf(it) } ?: emptyList()
+        val savedH2Peer = prefs.getString("clean_h2_peer", null)?.trim()?.takeIf { isWarpEndpoint(it) }?.let { listOf(it) } ?: emptyList()
+        val manual = prefs.getString("manual_endpoint", null)?.trim()?.takeIf { isWarpEndpoint(it) }?.let { listOf(it) } ?: emptyList()
+        val all = (manual + savedH2Peer + extraPeers.filter { isWarpEndpoint(it) } + savedCleanIp + existing + DEFAULT_CLEAN_H2_PEERS)
+            .filter { isWarpEndpoint(it) }
             .mapNotNull { formatPeerForProtocol(it, "masque") }
             .distinct()
         syncCleanH2Peers(context, all)
+    }
+
+    /**
+     * Purges cached MASQUE endpoints from native Aether if a bad endpoint was cached.
+     */
+    fun purgeMasqueCache(context: Context) {
+        runCatching {
+            File(context.filesDir, "uac-pow-masque-cache.json").takeIf { it.exists() }?.delete()
+            File(context.filesDir, "masque-gateway-cache.json").takeIf { it.exists() }?.delete()
+        }
     }
 
     /**
@@ -203,18 +223,16 @@ object CoreConfig {
      * the native prober against blocked endpoints.
      */
     fun syncCleanH2Peers(context: Context, peers: List<String>) {
-        if (peers.isEmpty()) return
+        val validPeers = peers.filter { isWarpEndpoint(it) }
+            .mapNotNull { formatPeerForProtocol(it, "masque") }
+            .distinct()
+        val finalPeers = if (validPeers.isNotEmpty()) validPeers else DEFAULT_CLEAN_H2_PEERS
         runCatching {
-            val formattedPeers = peers.mapNotNull { peer ->
-                formatPeerForProtocol(peer, "masque")
-            }.distinct()
-            if (formattedPeers.isNotEmpty()) {
-                val file = cleanH2File(context)
-                val json = JSONObject().apply {
-                    put("peers", org.json.JSONArray(formattedPeers))
-                }
-                file.writeText(json.toString())
+            val file = cleanH2File(context)
+            val json = JSONObject().apply {
+                put("peers", org.json.JSONArray(finalPeers))
             }
+            file.writeText(json.toString())
         }
     }
 
@@ -329,13 +347,20 @@ object CoreConfig {
             // any scanned/cached clean IP ONLY if it is actually a known WARP/MASQUE endpoint,
             // so the core dials directly without scanning. Web CDN IPs (104.16.x.x etc.)
             // scanned for VLESS/Trojan must not be forced on native WARP/MASQUE transports.
-            val manual = text("manual_endpoint").ifBlank { null }
-            val clean = cleanIpOverride?.trim()?.takeIf { it.isNotBlank() }
-                ?: text("clean_ip").ifBlank { null }
-            val candidatePeer = manual ?: clean?.takeIf { isWarpEndpoint(it) } ?: clean
-            val effectivePeer = if (candidatePeer != null) formatPeerForProtocol(candidatePeer, effectiveProtocol) else null
-            if (effectivePeer != null && effectiveProtocol.lowercase() in listOf("wom", "wg-over-masque", "masque", "mim")) {
-                syncCleanH2Peers(context, listOf(effectivePeer))
+            val manual = text("manual_endpoint").takeIf { it.isNotBlank() && isWarpEndpoint(it) }
+            val clean = cleanIpOverride?.trim()?.takeIf { it.isNotBlank() && isWarpEndpoint(it) }
+                ?: text("clean_ip").takeIf { it.isNotBlank() && isWarpEndpoint(it) }
+            val isMasqueFamily = effectiveProtocol.lowercase() in listOf("wom", "wg-over-masque", "masque", "mim")
+            if (isMasqueFamily) {
+                val candidateClean = listOfNotNull(manual, clean)
+                ensureCleanH2Peers(context, candidateClean)
+            }
+            val effectivePeer = if (manual != null) {
+                formatPeerForProtocol(manual, effectiveProtocol)
+            } else if (!isMasqueFamily && clean != null) {
+                formatPeerForProtocol(clean, effectiveProtocol)
+            } else {
+                null
             }
             putOpt("forced_peer", effectivePeer)
             put("obfuscation_profile", text("obfuscation_profile", "balanced"))
@@ -375,8 +400,14 @@ object CoreConfig {
     fun chainOuterJson(context: Context, protocol: String, cleanIpOverride: String? = null): String {
         val mci = AshaCarrier.isMci(context)
         val proto = if (protocol.lowercase() == "pow") "masque" else protocol.lowercase()
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val manual = prefs.getString("manual_endpoint", null)?.trim()?.takeIf { isWarpEndpoint(it) }
+        val cleanCandidate = cleanIpOverride?.trim()?.takeIf { isWarpEndpoint(it) }
+            ?: prefs.getString("clean_ip", null)?.trim()?.takeIf { isWarpEndpoint(it) }
+        val candidateList = listOfNotNull(manual, cleanCandidate)
+
         if (proto in listOf("masque", "mim")) {
-            ensureCleanH2Peers(context, if (!cleanIpOverride.isNullOrBlank()) listOf(cleanIpOverride) else emptyList())
+            ensureCleanH2Peers(context, candidateList)
         }
         return JSONObject().apply {
             put("config_path", File(context.filesDir, "uac-pow.toml").absolutePath)
@@ -400,14 +431,13 @@ object CoreConfig {
             put("h2_speed_pick", true)
             put("api_camo", "auto")
             put("gateway", false)
-            if (!cleanIpOverride.isNullOrBlank()) {
-                val peer = formatPeerForProtocol(cleanIpOverride, proto)
-                if (peer != null) {
-                    put("forced_peer", peer)
-                    if (proto in listOf("masque", "mim")) {
-                        syncCleanH2Peers(context, listOf(peer))
-                    }
-                }
+            if (manual != null) {
+                val peer = formatPeerForProtocol(manual, proto)
+                if (peer != null) put("forced_peer", peer)
+            } else if (proto in listOf("wireguard", "gool")) {
+                val effectiveCleanIp = cleanCandidate ?: DEFAULT_CLEAN_H2_PEERS.first()
+                val peer = formatPeerForProtocol(effectiveCleanIp, proto)
+                if (peer != null) put("forced_peer", peer)
             }
         }.toString()
     }
@@ -1170,14 +1200,20 @@ object CoreConfig {
             else -> "wom"
         }
 
-        val manual = text("manual_endpoint").ifBlank { null }
-        val clean = cleanIpOverride?.trim()?.takeIf { it.isNotBlank() }
-            ?: text("clean_ip").ifBlank { null }
-        val candidatePeer = manual ?: clean?.takeIf { isWarpEndpoint(it) } ?: clean
-        val effectivePeer = if (candidatePeer != null) formatPeerForProtocol(candidatePeer, protocol) else null
-
-        if (effectivePeer != null && protocol.lowercase() in listOf("wom", "wg-over-masque", "masque", "mim")) {
-            syncCleanH2Peers(context, listOf(effectivePeer))
+        val manual = text("manual_endpoint").takeIf { it.isNotBlank() && isWarpEndpoint(it) }
+        val clean = cleanIpOverride?.trim()?.takeIf { it.isNotBlank() && isWarpEndpoint(it) }
+            ?: text("clean_ip").takeIf { it.isNotBlank() && isWarpEndpoint(it) }
+        val isMasqueFamily = protocol.lowercase() in listOf("wom", "wg-over-masque", "masque", "mim")
+        if (isMasqueFamily) {
+            val candidateClean = listOfNotNull(manual, clean)
+            ensureCleanH2Peers(context, candidateClean)
+        }
+        val effectivePeer = if (manual != null) {
+            formatPeerForProtocol(manual, protocol)
+        } else if (!isMasqueFamily && clean != null) {
+            formatPeerForProtocol(clean, protocol)
+        } else {
+            null
         }
 
         val tlsOptions = getTlsOptions(context)

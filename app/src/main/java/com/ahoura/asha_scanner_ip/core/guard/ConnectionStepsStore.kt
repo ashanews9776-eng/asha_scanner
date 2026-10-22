@@ -19,6 +19,7 @@ enum class StepState {
     RUNNING,
     DONE,
     FAILED,
+    RETRYING,
 }
 
 data class ConnectionStep(
@@ -56,14 +57,14 @@ object ConnectionStepsStore {
             outerLabel = outerLabel,
             steps = current.steps,
         )
-        if (detail.isNotBlank()) note(detail)
+        if (detail.isNotBlank() && !detail.equals("null", ignoreCase = true)) note(detail)
         if (phase == ConnectionPhase.CONNECTED) finish(StepState.DONE)
         if (phase == ConnectionPhase.FAILED) finish(StepState.FAILED)
     }
 
     fun pulse(text: String) {
         val clean = text.trim().take(180)
-        if (clean.isEmpty()) return
+        if (clean.isEmpty() || clean.equals("null", ignoreCase = true)) return
         val current = mutableStatus.value
         val steps = current.steps.toMutableList()
         val last = steps.lastOrNull()
@@ -78,7 +79,7 @@ object ConnectionStepsStore {
 
     fun scan(text: String, outcome: String) {
         val clean = text.trim().take(180)
-        if (clean.isEmpty()) return
+        if (clean.isEmpty() || clean.equals("null", ignoreCase = true)) return
         val state = when (outcome) {
             "trying" -> StepState.RUNNING
             "accepted" -> StepState.DONE
@@ -99,9 +100,9 @@ object ConnectionStepsStore {
         mutableStatus.value = current.copy(steps = steps.takeLast(32))
     }
 
-    fun note(text: String, failed: Boolean = false) {
+    fun note(text: String, state: StepState = StepState.RUNNING) {
         val clean = text.trim().take(180)
-        if (clean.isEmpty()) return
+        if (clean.isEmpty() || clean.equals("null", ignoreCase = true)) return
         val current = mutableStatus.value
         val steps = current.steps.toMutableList()
         val last = steps.lastOrNull()
@@ -109,8 +110,12 @@ object ConnectionStepsStore {
         if (last != null && last.state == StepState.RUNNING) {
             steps[steps.lastIndex] = last.copy(state = StepState.DONE)
         }
-        steps += ConnectionStep(clean, if (failed) StepState.FAILED else StepState.RUNNING)
+        steps += ConnectionStep(clean, state)
         mutableStatus.value = current.copy(steps = steps.takeLast(32))
+    }
+
+    fun note(text: String, failed: Boolean) {
+        note(text, if (failed) StepState.FAILED else StepState.RUNNING)
     }
 
     fun failLast(errorText: String? = null) {
@@ -150,19 +155,25 @@ object ConnectionStepsStore {
                         if (line.startsWith("Scan ")) {
                             scan(line, line.substringAfterLast(' '))
                         } else {
-                            val failed = line.startsWith("Every saved") ||
+                            val isRetry = line.startsWith("Every saved") ||
                                 line.startsWith("Tunnel did not") ||
                                 line.startsWith("UDP/1701 did not") ||
                                 line.startsWith("No usable MASQUE") ||
+                                line.startsWith("Saved addresses failed") ||
                                 line.contains("refused")
-                            note(line, failed)
+                            if (isRetry) {
+                                note(line, StepState.RETRYING)
+                            } else {
+                                note(line, StepState.RUNNING)
+                            }
                         }
                     }
                 }
             }
             "status" -> {
                 val status = event.optString("status")
-                val detail = event.optString("detail")
+                val rawDetail = event.optString("detail")
+                val detail = if (rawDetail.isBlank() || rawDetail.equals("null", ignoreCase = true)) "" else rawDetail
                 when (status) {
                     "connected" -> update(ConnectionPhase.CONNECTED, 100, detail.ifBlank { "Connection established" })
                     "failed" -> update(ConnectionPhase.FAILED, 0, detail.ifBlank { "Connection failed" })

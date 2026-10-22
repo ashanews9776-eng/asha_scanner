@@ -192,7 +192,6 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      * the session has been torn down, but the service stays alive with a
      * Reconnect action waiting for the next tap. Kept distinct from
      * [userInitiatedStop], which means "stay off" and therefore forbids
-     * reconnect — a pause is defined by the fact that reconnect is still wanted.
      */
     private val paused = AtomicBoolean(false)
     private var tun: ParcelFileDescriptor? = null
@@ -2292,6 +2291,16 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 "log" -> {
                     val message = event.getString("message")
                     ConnectionLog.record(message)
+                    if (message.startsWith("Saved clean HTTP/2 address ")) {
+                        val address = message.removePrefix("Saved clean HTTP/2 address ").trim().trimEnd('.')
+                        if (address.isNotBlank() && CoreConfig.isWarpEndpoint(address)) {
+                            getSharedPreferences("settings", MODE_PRIVATE).edit()
+                                .putString("clean_h2_peer", address)
+                                .apply()
+                            CoreConfig.ensureCleanH2Peers(this@GuardVpnService, listOf(address))
+                            ConnectionLog.record("Cached clean MASQUE HTTP/2 address for instant connect: $address")
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -3413,12 +3422,8 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         val plainHint = prefs.getString(CoreConfig.PLAIN_WORKING_TRANSPORT_PREF, null)
             ?.let { ladder.indexOf(it) }
             ?.takeIf { it >= 0 }
-        // The remembered index is into the full ladder, so it only means anything
-        // when the full ladder is what we are walking.
         val start = when {
             !auto -> 0
-            chainMemory in ladder.indices -> chainMemory
-            plainHint != null -> plainHint
             else -> 0
         }
 
@@ -3444,14 +3449,19 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             val budget = chainOuterBudgetMs(protocol)
 
             // The core must be fully idle before this rung starts. If a previous
-            // rung is still unwinding, `startProxy` returns "already running"
-            // immediately while `isRunning`/`isReady` still describe the OLD tunnel
-            // — so awaitOuterProxy would accept a rung that never started. Refusing
-            // to continue is the only safe answer; the alternative is handing the
-            // inner leg a proxy backed by a tunnel that is being torn down.
+            // rung is still unwinding, wait up to 5 seconds before giving up on it.
+            // Never return null from the ladder; skipping to the next candidate
+            // allows other outer transports (WireGuard, WoW, WOM) to be tried.
             if (NativeCore.isRunning()) {
-                ConnectionLog.record("Chain: core still busy; cannot start the $label leg")
-                return null
+                val waitDeadline = SystemClock.elapsedRealtime() + 5_000L
+                while (NativeCore.isRunning() && SystemClock.elapsedRealtime() < waitDeadline) {
+                    try { Thread.sleep(200) } catch (e: InterruptedException) { break }
+                }
+                if (NativeCore.isRunning()) {
+                    ConnectionLog.record("Chain: core still busy after grace; skipping $label leg")
+                    stopOuterLeg()
+                    continue
+                }
             }
 
             ConnectionLog.record(
@@ -3468,10 +3478,18 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             ConnectionStepsStore.note("Connecting $label")
 
             val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-            val rawChosenEnroll = prefs.getString("manual_endpoint", null)?.trim().orEmpty().ifBlank {
-                prefs.getString("clean_ip", null)?.trim().orEmpty()
-            }.ifBlank { null }
-            val chosenEnroll = CoreConfig.formatPeerForProtocol(rawChosenEnroll, protocol)
+            val manualPref = prefs.getString("manual_endpoint", null)?.trim().orEmpty()
+            val cleanPref = prefs.getString("clean_ip", null)?.trim().orEmpty()
+            val cachedH2Pref = prefs.getString("clean_h2_peer", null)?.trim().orEmpty()
+
+            val isManual = manualPref.isNotBlank() && CoreConfig.isWarpEndpoint(manualPref)
+            val candidateClean = when {
+                isManual -> manualPref
+                cachedH2Pref.isNotBlank() && CoreConfig.isWarpEndpoint(cachedH2Pref) -> cachedH2Pref
+                cleanPref.isNotBlank() && CoreConfig.isWarpEndpoint(cleanPref) -> cleanPref
+                else -> "162.159.199.238:443"
+            }
+            val chosenEnroll = candidateClean.let { CoreConfig.formatPeerForProtocol(it, protocol) }
             var outerConfig = CoreConfig.chainOuterJson(this, protocol, cleanIpOverride = chosenEnroll)
             if (!IdentityProvisioner.hasIdentity(this, protocol)) {
                 ConnectionLog.record("Chain: outer leg ($protocol) needs identity provisioning")
@@ -3510,14 +3528,19 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                     android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER")
                 }
             }
-            if (chosenEnroll != null) {
-                runCatching {
+            runCatching {
+                if (chosenEnroll != null) {
                     android.system.Os.setenv("AETHER_PEER", chosenEnroll, true)
-                    if (protocol.lowercase() in listOf("masque", "mim", "gool", "warp-in-warp")) {
+                    if (protocol.lowercase() in listOf("masque", "mim", "gool", "warp-in-warp", "pow")) {
                         android.system.Os.setenv("AETHER_MASQUE_H2_PEER", chosenEnroll, true)
+                        CoreConfig.ensureCleanH2Peers(this@GuardVpnService, listOf(chosenEnroll))
                     } else if (protocol.lowercase() in listOf("wireguard", "wg")) {
                         android.system.Os.setenv("AETHER_WG_PEER", chosenEnroll, true)
                     }
+                } else {
+                    android.system.Os.unsetenv("AETHER_PEER")
+                    android.system.Os.unsetenv("AETHER_MASQUE_H2_PEER")
+                    android.system.Os.unsetenv("AETHER_WG_PEER")
                 }
             }
             val started = runCatching {
@@ -3644,9 +3667,11 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      * from a SIM whose usual transport is blocked, since the winner is remembered.
      */
     private fun chainOuterBudgetMs(protocol: String): Long = when (protocol.lowercase()) {
-        "masque", "pow" -> 120_000L
-        "wireguard" -> 24_000L
-        else -> 48_000L
+        "masque", "pow" -> 60_000L
+        "wireguard" -> 15_000L
+        "gool" -> 35_000L
+        "wom" -> 30_000L
+        else -> 30_000L
     }
 
     /**
@@ -3699,7 +3724,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             if (elapsed > OUTER_START_GRACE_MS && (!NativeCore.isRunning() && !isWomActive)) return false
             if ((NativeCore.isReady() || isWomActive) && outerProxyAccepts()) return true
             try {
-                Thread.sleep(300)
+                Thread.sleep(250)
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
                 return false
@@ -4005,13 +4030,13 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 val prefs = getSharedPreferences("settings", MODE_PRIVATE)
                 val manualEndpoint = prefs.getString("manual_endpoint", null)?.trim().orEmpty()
                 val storedCleanIp = prefs.getString("clean_ip", null)?.trim().orEmpty()
-                val rawCleanIp = manualEndpoint.takeIf { it.isNotBlank() }
-                    ?: storedCleanIp.takeIf { it.isNotBlank() }
+                val isManual = manualEndpoint.isNotBlank() && CoreConfig.isWarpEndpoint(manualEndpoint)
+                val rawCleanIp = if (isManual) manualEndpoint else storedCleanIp.takeIf { CoreConfig.isWarpEndpoint(it) }
                 val chosenEnrollIp = if (rawCleanIp != null) CoreConfig.formatPeerForProtocol(rawCleanIp, currentProtocol) else null
-                if (chosenEnrollIp != null && currentProtocol.lowercase() in listOf("masque", "mim", "wom", "wg-over-masque")) {
-                    CoreConfig.syncCleanH2Peers(this@GuardVpnService, listOf(chosenEnrollIp))
+                if (currentProtocol.lowercase() in listOf("masque", "mim", "wom", "wg-over-masque")) {
+                    CoreConfig.ensureCleanH2Peers(this@GuardVpnService, listOfNotNull(chosenEnrollIp))
                 }
-                val enrollHost = if (manualEndpoint.isNotBlank()) {
+                val enrollHost = if (isManual) {
                     manualEndpoint.removeSurrounding("[", "]").substringBefore(":")
                 } else if (rawCleanIp != null) {
                     rawCleanIp.removeSurrounding("[", "]").substringBefore(":")
@@ -4065,7 +4090,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                         android.system.Os.setenv("AETHER_MASQUE_VALIDATE_SECS", "15", true)
                         android.system.Os.setenv("AETHER_WG_VALIDATE_SECS", "15", true)
                         android.system.Os.setenv("AETHER_SCAN", "turbo", true)
-                        if (chosenEnrollIp != null) {
+                        if (isManual && chosenEnrollIp != null) {
                             android.system.Os.setenv("AETHER_MASQUE_H2_PEER", chosenEnrollIp, true)
                             android.system.Os.setenv("AETHER_PEER", chosenEnrollIp, true)
                         } else {

@@ -16,12 +16,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import com.ahoura.asha_scanner_ip.ui.components.CyberBackground
+import com.ahoura.asha_scanner_ip.ui.components.CyberNavBar
 import com.ahoura.asha_scanner_ip.ui.components.UpdateDialog
 import com.ahoura.asha_scanner_ip.ui.i18n.Lang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
@@ -68,7 +71,33 @@ fun AshaApp(vm: ScanViewModel) {
     ) {
         Asha_scanner_ipTheme(lang = lang) {
             CyberBackground(animated = animatedBg) {
-                Scaffold(modifier = Modifier.fillMaxSize(), containerColor = Color.Transparent) { inner ->
+                val isNavBarVisible = current != Route.LIVE && current != Route.RESULTS
+
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    containerColor = Color.Transparent,
+                    bottomBar = {
+                        CyberNavBar(
+                            currentRoute = current,
+                            visible = isNavBarVisible,
+                            onNavigate = { targetRoute ->
+                                if (targetRoute == current) return@CyberNavBar
+                                if (targetRoute == Route.HOME) {
+                                    home()
+                                } else {
+                                    if (targetRoute == Route.QUICK) {
+                                        vm.prepareQuickScan()
+                                    }
+                                    if (current == Route.HOME) {
+                                        push(targetRoute)
+                                    } else {
+                                        replaceTop(targetRoute)
+                                    }
+                                }
+                            }
+                        )
+                    }
+                ) { inner ->
                     Box(Modifier.fillMaxSize().padding(inner)) {
                         AnimatedContent(
                             targetState = current,
@@ -76,6 +105,7 @@ fun AshaApp(vm: ScanViewModel) {
                                 (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 20 })
                                     .togetherWith(fadeOut(tween(160)))
                             },
+                            modifier = Modifier.fillMaxSize(),
                             label = "route",
                         ) { route ->
                             when (route) {

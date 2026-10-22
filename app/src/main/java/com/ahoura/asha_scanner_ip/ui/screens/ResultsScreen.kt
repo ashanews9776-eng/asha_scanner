@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -58,11 +59,14 @@ import com.ahoura.asha_scanner_ip.ui.ScanViewModel
 import com.ahoura.asha_scanner_ip.ui.components.ColoBadge
 import com.ahoura.asha_scanner_ip.ui.components.CyberAppBar
 import com.ahoura.asha_scanner_ip.ui.components.CyberCard
+import com.ahoura.asha_scanner_ip.ui.components.CyberHaptics
+import com.ahoura.asha_scanner_ip.ui.components.HumanLatencyPill
 import com.ahoura.asha_scanner_ip.ui.components.LottieSonar
 import com.ahoura.asha_scanner_ip.ui.components.Pill
 import com.ahoura.asha_scanner_ip.ui.components.ScanButton
 import com.ahoura.asha_scanner_ip.ui.components.StaggerIn
 import com.ahoura.asha_scanner_ip.ui.components.TracerouteDialog
+import androidx.compose.ui.platform.LocalHapticFeedback
 import com.ahoura.asha_scanner_ip.ui.i18n.Lang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalLang
 import com.ahoura.asha_scanner_ip.ui.i18n.LocalStrings
@@ -74,6 +78,7 @@ import com.ahoura.asha_scanner_ip.ui.theme.AccentMuted
 import com.ahoura.asha_scanner_ip.ui.theme.BlueC
 import com.ahoura.asha_scanner_ip.ui.theme.BorderC
 import com.ahoura.asha_scanner_ip.ui.theme.GoldC
+import com.ahoura.asha_scanner_ip.ui.theme.OrangeC
 import com.ahoura.asha_scanner_ip.ui.theme.RedC
 import com.ahoura.asha_scanner_ip.ui.theme.ShareTechMono
 import com.ahoura.asha_scanner_ip.ui.theme.SilverC
@@ -119,10 +124,17 @@ fun ResultsScreen(
     val proxy = state.parsedProxy
     val s = LocalStrings.current
     val lang = LocalLang.current
+    val haptic = LocalHapticFeedback.current
     var snack by remember { mutableStateOf<String?>(null) }
     var traceResult by remember { mutableStateOf<ScanResult?>(null) }
     var actionResult by remember { mutableStateOf<ScanResult?>(null) }
     var showLegend by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (results.isNotEmpty()) {
+            CyberHaptics.success(context)
+        }
+    }
 
     var pendingWarp by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
     val vpnLauncher = rememberLauncherForActivityResult(
@@ -179,27 +191,62 @@ fun ResultsScreen(
                 }
             )
             Column(Modifier.padding(horizontal = 12.dp)) {
-                // ---- Header numbers ----
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                    Column(Modifier.weight(1f)) {
-                        Text("${state.progress.found}".localizeDigits(lang), color = Accent, fontFamily = ShareTechMono, fontSize = 32.sp)
-                        Text(
-                            s.healthyIpsTopShown.format(results.size).localizeDigits(lang),
-                            color = TextSecondaryC, fontFamily = displayFamily(lang), fontSize = if (lang == Lang.FA) 10.sp else 9.sp,
-                            letterSpacing = if (lang == Lang.FA) 0.sp else 1.sp,
-                        )
-                    }
-                    LottieSonar(Modifier.size(56.dp))
-                    Box(Modifier.size(12.dp))
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(if (bestMs > 0) "$bestMs".localizeDigits(lang) else "—", color = BlueC, fontFamily = ShareTechMono, fontSize = 22.sp)
-                        Text(
-                            if (lang == Lang.FA) s.bestMs else s.bestMs.uppercase(),
-                            color = TextMutedC, fontFamily = monoFamily(lang), fontSize = if (lang == Lang.FA) 10.sp else 9.sp,
-                            letterSpacing = if (lang == Lang.FA) 0.sp else 1.sp,
-                        )
+                // ---- Header Telemetry Card ----
+                CyberCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    padding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    Modifier.size(8.dp).clip(CircleShape).background(Accent)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "${state.progress.found}".localizeDigits(lang),
+                                    color = Accent,
+                                    fontFamily = ShareTechMono,
+                                    fontSize = 24.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                s.healthyIpsTopShown.format(results.size).localizeDigits(lang),
+                                color = TextSecondaryC,
+                                fontFamily = displayFamily(lang),
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        LottieSonar(Modifier.size(46.dp))
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                if (bestMs > 0) "$bestMs ms".localizeDigits(lang) else "—",
+                                color = BlueC,
+                                fontFamily = ShareTechMono,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                if (lang == Lang.FA) s.bestMs else s.bestMs.uppercase(),
+                                color = TextMutedC,
+                                fontFamily = monoFamily(lang),
+                                fontSize = 9.sp
+                            )
+                        }
                     }
                 }
+
+                Spacer8()
+
                 // ---- Quality Legend ----
                 if (showLegend) {
                     GradeLegend()
@@ -210,36 +257,59 @@ fun ResultsScreen(
                 if (results.isNotEmpty()) {
                     val best = results.first()
                     val bestIp = best.ip
-                    CyberCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(4.dp)) {
+                    CyberCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        padding = PaddingValues(12.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(
                                 Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("⚡", fontSize = 14.sp)
-                                    Spacer(Modifier.size(6.dp))
+                                    Icon(
+                                        Icons.Filled.Bolt,
+                                        contentDescription = null,
+                                        tint = Accent,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
                                     Text(
-                                        "${s.connectWithCleanIp}: $bestIp",
-                                        color = Accent,
+                                        "${s.connectWithCleanIp}:",
+                                        color = TextSecondaryC,
                                         fontFamily = displayFamily(lang),
+                                        fontSize = 11.sp
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        bestIp,
+                                        color = Accent,
+                                        fontFamily = ShareTechMono,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
+                                        fontSize = 13.sp
                                     )
                                 }
                                 Pill("${best.avgLatencyMs.toInt()}ms")
                             }
-                            Spacer(Modifier.size(8.dp))
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                ActionBtn("WARP (WG)", Accent, AccentMuted, AccentBorder, Modifier.weight(1f)) {
-                                    startWarpTransport(best.ip, best.port, "wireguard")
+
+                            HumanLatencyPill(latencyMs = best.avgLatencyMs.toInt(), modifier = Modifier.fillMaxWidth())
+
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                ActionBtn("⚡ Asha PoW", Accent, Accent.copy(alpha = 0.12f), AccentBorder, Modifier.weight(1f)) {
+                                    startWarpTransport(best.ip, best.port, "pow")
                                 }
-                                ActionBtn("MASQUE", BlueC, BlueC.copy(alpha = 0.08f), BlueC.copy(alpha = 0.4f), Modifier.weight(1f)) {
+                                ActionBtn("🚀 MASQUE", BlueC, BlueC.copy(alpha = 0.12f), BlueC.copy(alpha = 0.4f), Modifier.weight(1f)) {
                                     startWarpTransport(best.ip, best.port, "masque")
                                 }
+                                ActionBtn("🛡️ WARP", OrangeC, OrangeC.copy(alpha = 0.12f), OrangeC.copy(alpha = 0.4f), Modifier.weight(1f)) {
+                                    startWarpTransport(best.ip, best.port, "wireguard")
+                                }
                                 if (proxy != null && onConnectVpn != null) {
-                                    ActionBtn("CUSTOM", GoldC, GoldC.copy(alpha = 0.08f), GoldC.copy(alpha = 0.4f), Modifier.weight(1f)) {
+                                    ActionBtn("⚙ CUSTOM", GoldC, GoldC.copy(alpha = 0.12f), GoldC.copy(alpha = 0.4f), Modifier.weight(1f)) {
                                         onConnectVpn(bestIp)
                                     }
                                 }
@@ -322,8 +392,9 @@ fun ResultsScreen(
                     )
                 }
             } else LazyColumn(
-                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 itemsIndexed(results, key = { _, r -> r.endpoint }) { index, r ->
                     val rank = index + 1
@@ -335,6 +406,7 @@ fun ResultsScreen(
                             onAction = { actionResult = r },
                             onGradeClick = { showLegend = true },
                             onCopy = {
+                                CyberHaptics.copySuccess(context, haptic)
                                 if (proxy != null) {
                                     clipboard.setText(AnnotatedString(ConfigLinkBuilder.withAddress(proxy, r.ip, r.port)))
                                     snack = s.copiedConfigFor.format(r.ip)
@@ -445,76 +517,192 @@ private fun ResultRowFull(
         else -> TextFadedC
     }
     val ipColor = if (rank <= 3) Accent else TextPrimaryC
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(5.dp)).background(SurfaceC)
-            .border(0.5.dp, BorderC, RoundedCornerShape(5.dp))
-            .clickable(onClick = onAction)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+
+    CyberCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onAction),
+        padding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
     ) {
-        Text(
-            rank.toString().padStart(2, '0'), color = rankColor, fontFamily = ShareTechMono,
-            fontSize = 12.sp, modifier = Modifier.width(24.dp),
-        )
-        Box(
-            Modifier.size(24.dp).clip(CircleShape).background(gradeColor(grade))
-                .clickable(onClick = onGradeClick),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(grade.label, color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = ShareTechMono)
-        }
-        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-            Text(r.ip, color = ipColor, fontFamily = ShareTechMono, fontSize = 13.sp)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("${r.avgLatencyMs.toInt()}ms", color = latency(r.avgLatencyMs.toInt()), fontFamily = ShareTechMono, fontSize = 10.sp)
-                Text("loss ${(r.loss * 100).toInt()}%", color = TextMutedC, fontFamily = ShareTechMono, fontSize = 10.sp)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Row 1: Rank, Grade, IP, Colo, Copy button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Rank Pill
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(rankColor.copy(alpha = 0.12f))
+                        .border(0.5.dp, rankColor.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        "#${rank.toString().padStart(2, '0')}",
+                        color = rankColor,
+                        fontFamily = ShareTechMono,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+                }
+
+                Spacer(Modifier.width(8.dp))
+
+                // Quality Grade Circle
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(gradeColor(grade))
+                        .clickable(onClick = onGradeClick),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        grade.label,
+                        color = Color.Black,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = ShareTechMono
+                    )
+                }
+
+                Spacer(Modifier.width(8.dp))
+
+                // Clean IP Address
+                Text(
+                    r.ip,
+                    color = ipColor,
+                    fontFamily = ShareTechMono,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f)
+                )
+
+                // Colo badge (e.g. FRA, AMS)
+                ColoBadge(r.colo)
+
+                Spacer(Modifier.width(6.dp))
+
+                // Copy Button with proper tap target
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(SurfaceC)
+                        .clickable(onClick = onCopy),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.ContentCopy,
+                        contentDescription = if (hasConfig) "copy config" else "copy IP",
+                        tint = Accent,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+            }
+
+            // Row 2: Metrics Strip
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(latency(r.avgLatencyMs.toInt()))
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "${r.avgLatencyMs.toInt()} ms",
+                        color = latency(r.avgLatencyMs.toInt()),
+                        fontFamily = ShareTechMono,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Text(
+                    "• loss ${(r.loss * 100).toInt()}%",
+                    color = if (r.loss > 0) OrangeC else TextMutedC,
+                    fontFamily = ShareTechMono,
+                    fontSize = 10.sp
+                )
+
                 if (r.speedTested && r.throughputBytesPerSec > 0) {
-                    Text("${String.format(java.util.Locale.US, "%.1f", r.throughputMbps)} Mbps", color = AccentDim, fontFamily = ShareTechMono, fontSize = 10.sp)
+                    Text(
+                        "• ${String.format(java.util.Locale.US, "%.1f", r.throughputMbps)} Mbps",
+                        color = AccentDim,
+                        fontFamily = ShareTechMono,
+                        fontSize = 10.sp
+                    )
                 }
+
                 if (r.passRate < 1.0) {
-                    Text("pass ${(r.passRate * 100).toInt()}%", color = com.ahoura.asha_scanner_ip.ui.theme.OrangeC, fontFamily = ShareTechMono, fontSize = 10.sp)
+                    Text(
+                        "• pass ${(r.passRate * 100).toInt()}%",
+                        color = OrangeC,
+                        fontFamily = ShareTechMono,
+                        fontSize = 10.sp
+                    )
                 }
             }
-            // Use-case badges
-            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isGoodForGaming(r)) {
-                    QualityBadge(s.gaming, GoldC)
-                }
-                if (com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isGoodForStreaming(r)) {
-                    QualityBadge(s.streaming, Accent)
-                }
-                if (com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isStable(r)) {
-                    QualityBadge(s.stability, BlueC)
+
+            // Row 3: Quality Badges
+            val showBadges = rank == 1 ||
+                com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isGoodForGaming(r) ||
+                com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isGoodForStreaming(r) ||
+                com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isStable(r)
+
+            if (showBadges) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (rank == 1) {
+                        Pill(
+                            s.bestMatchForYou,
+                            textColor = GoldC,
+                            borderColor = GoldC.copy(alpha = 0.5f),
+                            bgColor = GoldC.copy(alpha = 0.12f)
+                        )
+                    }
+                    if (com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isGoodForGaming(r)) {
+                        QualityBadge(s.gaming, GoldC)
+                    }
+                    if (com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isGoodForStreaming(r)) {
+                        QualityBadge(s.streaming, Accent)
+                    }
+                    if (com.ahoura.asha_scanner_ip.core.engine.QualityEvaluator.isStable(r)) {
+                        QualityBadge(s.stability, BlueC)
+                    }
                 }
             }
-        }
-        ColoBadge(r.colo)
-        Box(Modifier.size(8.dp))
-        // Larger tap target (≥40dp) around the copy glyph; copies a ready config
-        // link when a proxy was pasted, otherwise the bare IP.
-        Box(
-            Modifier.size(40.dp).clickable(onClick = onCopy),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Filled.ContentCopy,
-                contentDescription = if (hasConfig) "copy config" else "copy IP",
-                tint = Accent, modifier = Modifier.size(18.dp),
-            )
         }
     }
 }
 
 @Composable
 private fun QualityBadge(label: String, color: Color) {
+    val lang = LocalLang.current
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(3.dp))
-            .background(color.copy(alpha = 0.1f))
-            .border(0.5.dp, color.copy(alpha = 0.4f), RoundedCornerShape(3.dp))
-            .padding(horizontal = 4.dp, vertical = 2.dp)
+            .background(color.copy(alpha = 0.12f))
+            .border(0.5.dp, color.copy(alpha = 0.45f), RoundedCornerShape(3.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
     ) {
-        Text(label, color = color, fontFamily = ShareTechMono, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+        Text(
+            label,
+            color = color,
+            fontFamily = if (lang == Lang.FA) Vazirmatn else ShareTechMono,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 

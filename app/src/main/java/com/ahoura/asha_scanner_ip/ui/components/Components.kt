@@ -28,15 +28,24 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -388,3 +397,227 @@ fun KvInput(
         )
     }
 }
+
+/**
+ * Modern collapsible cyberpunk card with smooth animated disclosure.
+ * Keeps complex/pro settings tucked away until requested by the user.
+ */
+@Composable
+fun ExpandableCyberCard(
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    iconTint: Color = Accent,
+    initiallyExpanded: Boolean = false,
+    badgeText: String? = null,
+    badgeColor: Color = Accent,
+    content: @Composable () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(initiallyExpanded) }
+    val rotation by animateFloatAsState(targetValue = if (expanded) 180f else 0f, label = "chevron")
+    val lang = LocalLang.current
+
+    Box(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(SurfaceC)
+            .border(0.5.dp, if (expanded) AccentBorder.copy(alpha = 0.6f) else BorderC, RoundedCornerShape(10.dp))
+    ) {
+        Column {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (icon != null) {
+                    Box(
+                        Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(iconTint.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(icon, null, tint = iconTint, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            title,
+                            color = TextPrimaryC,
+                            fontFamily = displayFamily(lang),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                        )
+                        if (badgeText != null) {
+                            Spacer(Modifier.width(8.dp))
+                            Pill(
+                                badgeText,
+                                textColor = badgeColor,
+                                borderColor = badgeColor.copy(alpha = 0.4f),
+                                bgColor = badgeColor.copy(alpha = 0.1f)
+                            )
+                        }
+                    }
+                    if (subtitle != null) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            subtitle,
+                            color = TextMutedC,
+                            fontFamily = Vazirmatn,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp,
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = if (expanded) Accent else TextMutedC,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .graphicsLayer { rotationZ = rotation }
+                )
+            }
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, end = 14.dp, bottom = 14.dp, top = 2.dp)
+                ) {
+                    androidx.compose.material3.HorizontalDivider(
+                        color = BorderC.copy(alpha = 0.6f),
+                        thickness = 0.5.dp,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                    content()
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Segmented pill selector for switching modes (e.g. Smart vs Manual).
+ */
+@Composable
+fun <T> SegmentedModeSelector(
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val lang = LocalLang.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(SurfaceC)
+            .border(0.5.dp, BorderC, RoundedCornerShape(8.dp))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        options.forEach { (key, label) ->
+            val isSelected = key == selected
+            Box(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (isSelected) Accent else Color.Transparent)
+                    .clickable { onSelect(key) }
+                    .padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = label,
+                    color = if (isSelected) Color.Black else TextSecondaryC,
+                    fontFamily = displayFamily(lang),
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    fontSize = 12.sp,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Modern feature tile for dashboard/home actions.
+ */
+@Composable
+fun ModernFeatureCard(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    badgeText: String? = null,
+    onClick: () -> Unit,
+) {
+    val lang = LocalLang.current
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(SurfaceC)
+            .border(0.5.dp, BorderC, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(iconTint.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, null, tint = iconTint, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        title,
+                        color = TextPrimaryC,
+                        fontFamily = displayFamily(lang),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                    )
+                    if (badgeText != null) {
+                        Spacer(Modifier.width(6.dp))
+                        Pill(
+                            badgeText,
+                            textColor = iconTint,
+                            borderColor = iconTint.copy(alpha = 0.3f),
+                            bgColor = iconTint.copy(alpha = 0.08f)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    subtitle,
+                    color = TextMutedC,
+                    fontFamily = Vazirmatn,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp,
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = TextMutedC,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+

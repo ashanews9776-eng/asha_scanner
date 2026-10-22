@@ -405,6 +405,60 @@ interface AppStrings {
     val secAntiDpi: String
     val secProfile: String
     val secResults: String
+
+    // New Simplified UI & Home Strings
+    val smartVpnCardTitle: String
+    val smartVpnCardSubtitle: String
+    val cleanIpScanTitle: String
+    val cleanIpScanSubtitle: String
+    val homeToolsTitle: String
+    val operatorDetected: String
+    val quickConnect: String
+    val quickDisconnect: String
+    val vpnModeSmart: String
+    val vpnModeManual: String
+    val vpnSmartDesc: String
+    val advancedTunnelSettings: String
+    val advancedTunnelSettingsDesc: String
+    val exitLocation: String
+    val domesticBypassDescShort: String
+    val protocolSelectorTitle: String
+
+    // Enhanced UI & Tactical UX strings
+    val dockVpn: String
+    val dockHome: String
+    val dockScanner: String
+    val dockTools: String
+    val latencyUltra: String
+    val latencyFast: String
+    val latencyNormal: String
+    val latencyHigh: String
+    val bestMatchForYou: String
+    val trafficPathTitle: String
+    val trafficPathAntiDpi: String
+    val trafficPathCloudflare: String
+    val trafficPathFreeWeb: String
+    val tapForInspection: String
+    val liveTrafficMonitor: String
+    val liveSpeedRx: String
+    val liveSpeedTx: String
+    val liveTelemetry: String
+    val copyTelemetry: String
+    val telemetryTitle: String
+    val telemetrySubtitle: String
+    val stepRetryingTag: String
+    val smartModePresetPow: String
+    val smartModePresetPowDesc: String
+    val smartModePresetMasque: String
+    val smartModePresetMasqueDesc: String
+    val smartModePresetShard: String
+    val smartModePresetShardDesc: String
+    val latencyQualityUltra: String
+    val latencyQualityGood: String
+    val latencyQualityFair: String
+    val arcReactorReady: String
+    val arcReactorConnecting: String
+    val arcReactorSecured: String
 }
 
 
@@ -794,6 +848,60 @@ internal object EN : AppStrings {
     override val secAntiDpi: String = "03 / ANTI-DPI & EVASION"
     override val secProfile: String = "04 / SCAN PROFILE & PARAMS"
     override val secResults: String = "05 / RESULTS & METRICS"
+
+    // New Simplified UI & Home Strings
+    override val smartVpnCardTitle: String = "Smart VPN"
+    override val smartVpnCardSubtitle: String = "Resilient anti-censorship tunnel"
+    override val cleanIpScanTitle: String = "Clean IP Scanner"
+    override val cleanIpScanSubtitle: String = "Find fast Cloudflare IPs for your ISP"
+    override val homeToolsTitle: String = "Tools & Diagnostics"
+    override val operatorDetected: String = "Network"
+    override val quickConnect: String = "CONNECT"
+    override val quickDisconnect: String = "DISCONNECT"
+    override val vpnModeSmart: String = "Smart Auto"
+    override val vpnModeManual: String = "Manual Protocols"
+    override val vpnSmartDesc: String = "Asha Smart Engine automatically selects the most resilient path and protocol for your network."
+    override val advancedTunnelSettings: String = "Advanced Anti-DPI & Network"
+    override val advancedTunnelSettingsDesc: String = "Packet fragmentation, MTU optimizer, exit mode & security"
+    override val exitLocation: String = "Exit Location"
+    override val domesticBypassDescShort: String = "Direct routing for domestic banking & local sites"
+    override val protocolSelectorTitle: String = "Select Communication Protocol"
+
+    // Enhanced UI & Tactical UX strings
+    override val dockVpn: String = "VPN"
+    override val dockHome: String = "Dashboard"
+    override val dockScanner: String = "Scanner"
+    override val dockTools: String = "Tools"
+    override val latencyUltra: String = "Ultra Fast · Gaming & Stream"
+    override val latencyFast: String = "High Speed · Calls & Social"
+    override val latencyNormal: String = "Stable · Web Browsing"
+    override val latencyHigh: String = "High Latency"
+    override val bestMatchForYou: String = "Best match for your network"
+    override val trafficPathTitle: String = "Live Tunnel Path"
+    override val trafficPathAntiDpi: String = "Anti-DPI Shield"
+    override val trafficPathCloudflare: String = "Cloudflare Edge"
+    override val trafficPathFreeWeb: String = "Free Internet"
+    override val tapForInspection: String = "Tap for hop-by-hop packet inspection"
+    override val liveTrafficMonitor: String = "Live Traffic Wave"
+    override val liveSpeedRx: String = "Download"
+    override val liveSpeedTx: String = "Upload"
+    override val liveTelemetry: String = "LIVE TELEMETRY"
+    override val copyTelemetry: String = "Copy Telemetry Report"
+    override val telemetryTitle: String = "DIAGNOSTIC TELEMETRY CONSOLE"
+    override val telemetrySubtitle: String = "Real-time engine telemetry, tunnel diagnostics & packet flow"
+    override val stepRetryingTag: String = "Fallback"
+    override val smartModePresetPow: String = "Asha PoW (Smart)"
+    override val smartModePresetPowDesc: String = "Dual-layer WARP + Psiphon; highest resilience across all carriers."
+    override val smartModePresetMasque: String = "MASQUE (Ultra Fast)"
+    override val smartModePresetMasqueDesc: String = "Direct next-gen HTTP/3; lowest ping for gaming, YouTube & streaming."
+    override val smartModePresetShard: String = "SHARD (Anti-Censorship)"
+    override val smartModePresetShardDesc: String = "Distributed nodes for severe national internet disruptions."
+    override val latencyQualityUltra: String = "🟢 Low Latency · Gaming & Streams"
+    override val latencyQualityGood: String = "🟡 Good · Calls & Social Apps"
+    override val latencyQualityFair: String = "🟠 High Latency"
+    override val arcReactorReady: String = "READY TO CONNECT"
+    override val arcReactorConnecting: String = "SECURING TUNNEL…"
+    override val arcReactorSecured: String = "SECURE & ENCRYPTED"
 }
 
 
@@ -1183,6 +1291,60 @@ internal object FA : AppStrings {
     override val secAntiDpi: String = "۰۳ / ضد فیلترینگ و دور زدن DPI"
     override val secProfile: String = "۰۴ / پروفایل و سرعت اسکن"
     override val secResults: String = "۰۵ / نتایج و خروجی‌ها"
+
+    // New Simplified UI & Home Strings
+    override val smartVpnCardTitle: String = "وی‌پی‌ان هوشمند آشا"
+    override val smartVpnCardSubtitle: String = "اتصال پایدار و ضد فیلترینگ قدرتمند"
+    override val cleanIpScanTitle: String = "اسکن هوشمند آی‌پی تمیز"
+    override val cleanIpScanSubtitle: String = "یافتن سریع‌ترین آی‌پی‌های بدون فیلتر کلودفلر برای اینترنت شما"
+    override val homeToolsTitle: String = "ابزارها و قابلیت‌ها"
+    override val operatorDetected: String = "شبکه اینترنت"
+    override val quickConnect: String = "اتصال سریع"
+    override val quickDisconnect: String = "قطع اتصال"
+    override val vpnModeSmart: String = "اتصال هوشمند"
+    override val vpnModeManual: String = "انتخاب دستی"
+    override val vpnSmartDesc: String = "سیستم هوشمند آشا پایدارترین پروتکل و مسیر را متناسب با اپراتور شما (همراه اول، ایرانسل، مخابرات و...) به صورت خودکار انتخاب می‌کند."
+    override val advancedTunnelSettings: String = "تنظیمات پیشرفته و ضد فیلترینگ"
+    override val advancedTunnelSettingsDesc: String = "تکه‌تکه‌کردن بسته، بهینه‌ساز MTU، پروتکل خروجی و گارد امنیتی"
+    override val exitLocation: String = "موقعیت سرور خروجی"
+    override val domesticBypassDescShort: String = "سایت‌های بانکی، دولتی و داخلی بدون فیلترشکن باز شوند"
+    override val protocolSelectorTitle: String = "انتخاب پروتکل ارتباطی"
+
+    // Enhanced UI & Tactical UX strings
+    override val dockVpn: String = "وی‌پی‌ان"
+    override val dockHome: String = "داشبورد"
+    override val dockScanner: String = "اسکنر"
+    override val dockTools: String = "ابزارها"
+    override val latencyUltra: String = "🚀 عالی برای گیمینگ و اینستاگرام"
+    override val latencyFast: String = "⚡ پرسرعت برای تماس و تلگرام"
+    override val latencyNormal: String = "🌐 پایدار و مناسب وب‌گردی"
+    override val latencyHigh: String = "⚠️ تاخیر بالا"
+    override val bestMatchForYou: String = "⚡ بهترین انتخاب برای شبکه شما"
+    override val trafficPathTitle: String = "مسیر زنده پرواز ترافیک"
+    override val trafficPathAntiDpi: String = "شیلد ضد فیلتر"
+    override val trafficPathCloudflare: String = "شبکه کلودفلر"
+    override val trafficPathFreeWeb: String = "اینترنت آزاد"
+    override val tapForInspection: String = "لمس برای بازرسی جزء‌به‌جزء پکت‌ها"
+    override val liveTrafficMonitor: String = "امواج زنده ترافیک شبکه"
+    override val liveSpeedRx: String = "دانلود"
+    override val liveSpeedTx: String = "آپلود"
+    override val liveTelemetry: String = "تله‌متری زنده"
+    override val copyTelemetry: String = "کپی گزارش عیب‌یابی"
+    override val telemetryTitle: String = "کنسول تله‌متری زنده شبکه"
+    override val telemetrySubtitle: String = "گزارش زنده رویدادهای هسته نیتیو، مسیر بسته‌ها و عیب‌یابی تونل"
+    override val stepRetryingTag: String = "تست جایگزین"
+    override val smartModePresetPow: String = "Asha PoW (هوشمند)"
+    override val smartModePresetPowDesc: String = "ترکیب دو لایه وارپ و سایفون؛ بیشترین پایداری در همراه اول، ایرانسل و رایتل."
+    override val smartModePresetMasque: String = "MASQUE (فوق سریع)"
+    override val smartModePresetMasqueDesc: String = "اتصال مستقیم HTTP/3 با پینگ بسیار پایین؛ ایده‌آل برای گیم و یوتیوب."
+    override val smartModePresetShard: String = "SHARD (ضد اختلال)"
+    override val smartModePresetShardDesc: String = "پل عبور از فیلترینگ شدید برای شرایط قطعی و اختلال سراسری اینترنت."
+    override val latencyQualityUltra: String = "🟢 پینگ عالی · مناسب گیم و استریم"
+    override val latencyQualityGood: String = "🟡 پینگ مناسب · وب‌گردی و پیام‌رسان"
+    override val latencyQualityFair: String = "🟠 پینگ نسبتاً بالا"
+    override val arcReactorReady: String = "آماده اتصال امن"
+    override val arcReactorConnecting: String = "در حال برقراری امنیت…"
+    override val arcReactorSecured: String = "تونل ایمن و فعال"
 }
 
 
