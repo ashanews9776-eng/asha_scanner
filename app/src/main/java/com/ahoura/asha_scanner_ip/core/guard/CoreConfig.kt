@@ -445,8 +445,11 @@ object CoreConfig {
     /**
      * The outer transports tried, in order, until one carries Psiphon.
      * MASQUE leads because it uses HTTP/2 over TCP/443 with TLS fragmentation.
+     * WOM (the whiteaesther engine) closes the ladder as the last resort: it is
+     * the newest engine, so it gets the final word when every libaether rung
+     * has been rejected by the carrier.
      */
-    val CHAIN_OUTER_LADDER = listOf("masque", "gool", "wireguard")
+    val CHAIN_OUTER_LADDER = listOf("masque", "gool", "wireguard", "wom")
 
     /**
      * Which transport the user pinned for the chain's outer leg, or "auto".

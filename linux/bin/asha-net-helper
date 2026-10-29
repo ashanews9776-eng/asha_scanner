@@ -1,0 +1,150 @@
+#!/bin/bash
+set -e
+
+# Asha Scanner Privileged Network Helper
+# Handles TUN interface creation, routing table manipulation, Iran bypass, DNS, and killswitch.
+
+ACTION="$1"
+shift || true
+
+CF_WARP_CIDRS="162.159.192.0/24 162.159.193.0/24 162.159.195.0/24 188.114.96.0/24 188.114.97.0/24 188.114.98.0/24 188.114.99.0/24"
+
+case "$ACTION" in
+    tun-up)
+        DEV="${1:-asha0}"
+        IP="${2:-10.0.0.2/24}"
+        USER_OWNER="$3"
+        ip link set dev "$DEV" down 2>/dev/null || true
+        ip tuntap del dev "$DEV" mode tun 2>/dev/null || true
+        if [ -n "$USER_OWNER" ]; then
+            ip tuntap add dev "$DEV" mode tun user "$USER_OWNER"
+        else
+            ip tuntap add dev "$DEV" mode tun
+        fi
+        ip addr add "$IP" dev "$DEV"
+        ip link set dev "$DEV" mtu 1420 up
+        ;;
+
+    tun-down)
+        DEV="${1:-asha0}"
+        ip link set dev "$DEV" down 2>/dev/null || true
+        ip tuntap del dev "$DEV" mode tun 2>/dev/null || true
+        ;;
+
+    route-up)
+        DEV="${1:-asha0}"
+        PROXY_IP="$2"
+        GW_IP="$3"
+        GW_DEV="$4"
+
+        # 1. Pin Cloudflare Warp CIDRs via physical gateway so Aether packets never loop back into asha0
+        if [ -n "$GW_IP" ] && [ -n "$GW_DEV" ]; then
+            for cidr in $CF_WARP_CIDRS; do
+                ip route replace "$cidr" via "$GW_IP" dev "$GW_DEV" 2>/dev/null || true
+            done
+            if [ -n "$PROXY_IP" ]; then
+                ip route replace "$PROXY_IP" via "$GW_IP" dev "$GW_DEV" 2>/dev/null || true
+            fi
+            # Keep the physical gateway itself reachable (LAN mgmt, old-DNS fallback)
+            ip route replace "$GW_IP/32" via "$GW_IP" dev "$GW_DEV" 2>/dev/null || true
+        fi
+
+        # 2. Route default traffic through TUN
+        ip route replace 0.0.0.0/1 dev "$DEV"
+        ip route replace 128.0.0.0/1 dev "$DEV"
+
+        # 3. Configure secure public DNS inside tunnel so Iranian ISP DNS doesn't poison queries.
+        #    /etc/resolv.conf may be a SYMLINK into systemd-resolved's runtime — writing through
+        #    it gets regenerated within seconds and DNS dies (the "connected but nothing
+        #    works" defect). Break the symlink and install a real file; the old resolvers
+        #    stay reachable via pinned /32 routes above as a fallback.
+        if [ -f /etc/resolv.conf ] && [ ! -f /tmp/resolv.conf.asha.bak ]; then
+            cp -L /etc/resolv.conf /tmp/resolv.conf.asha.bak 2>/dev/null || true
+        fi
+        for ns in $(grep -E "^nameserver" /tmp/resolv.conf.asha.bak 2>/dev/null | awk '{print $2}' | grep -vE "^127\." | head -3); do
+            if [ -n "$GW_IP" ] && [ -n "$GW_DEV" ]; then
+                ip route replace "$ns/32" via "$GW_IP" dev "$GW_DEV" 2>/dev/null || true
+            fi
+        done
+        rm -f /etc/resolv.conf 2>/dev/null || true
+        printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\noptions timeout:2 attempts:2\n" > /etc/resolv.conf 2>/dev/null || true
+        ;;
+
+    route-down)
+        DEV="${1:-asha0}"
+        PROXY_IP="$2"
+
+        # 1. Remove TUN default routes
+        ip route del 0.0.0.0/1 dev "$DEV" 2>/dev/null || true
+        ip route del 128.0.0.0/1 dev "$DEV" 2>/dev/null || true
+
+        # 2. Clean up Cloudflare / Proxy IP routes
+        for cidr in $CF_WARP_CIDRS; do
+            ip route del "$cidr" 2>/dev/null || true
+        done
+        if [ -n "$PROXY_IP" ]; then
+            ip route del "$PROXY_IP" 2>/dev/null || true
+        fi
+
+        # 2.5 Remove the old-resolver /32 pins added by route-up
+        if [ -f /tmp/resolv.conf.asha.bak ]; then
+            for ns in $(grep -E "^nameserver" /tmp/resolv.conf.asha.bak 2>/dev/null | awk '{print $2}' | grep -vE "^127\." | head -3); do
+                ip route del "$ns/32" 2>/dev/null || true
+            done
+        fi
+
+        # 3. Restore original system DNS
+        if [ -f /tmp/resolv.conf.asha.bak ]; then
+            cp /tmp/resolv.conf.asha.bak /etc/resolv.conf 2>/dev/null || true
+            rm -f /tmp/resolv.conf.asha.bak
+        fi
+        ;;
+
+    iran-bypass-up)
+        GW_IP="$1"
+        GW_DEV="$2"
+        CIDR_FILE="$3"
+        if [ -f "$CIDR_FILE" ] && [ -n "$GW_IP" ] && [ -n "$GW_DEV" ]; then
+            while IFS= read -r cidr || [ -n "$cidr" ]; do
+                cidr=$(echo "$cidr" | tr -d '\r\n ' )
+                [ -z "$cidr" ] && continue
+                [[ "$cidr" =~ ^# ]] && continue
+                ip route replace "$cidr" via "$GW_IP" dev "$GW_DEV" 2>/dev/null || true
+            done < "$CIDR_FILE"
+        fi
+        ;;
+
+    iran-bypass-down)
+        CIDR_FILE="$1"
+        if [ -f "$CIDR_FILE" ]; then
+            while IFS= read -r cidr || [ -n "$cidr" ]; do
+                cidr=$(echo "$cidr" | tr -d '\r\n ' )
+                [ -z "$cidr" ] && continue
+                [[ "$cidr" =~ ^# ]] && continue
+                ip route del "$cidr" 2>/dev/null || true
+            done < "$CIDR_FILE"
+        fi
+        ;;
+
+    killswitch-on)
+        PROXY_IP="$1"
+        DEV="${2:-asha0}"
+        iptables -F OUTPUT 2>/dev/null || true
+        iptables -A OUTPUT -o lo -j ACCEPT
+        iptables -A OUTPUT -o "$DEV" -j ACCEPT
+        if [ -n "$PROXY_IP" ]; then
+            iptables -A OUTPUT -d "$PROXY_IP" -j ACCEPT
+        fi
+        iptables -P OUTPUT DROP
+        ;;
+
+    killswitch-off)
+        iptables -P OUTPUT ACCEPT 2>/dev/null || true
+        iptables -F OUTPUT 2>/dev/null || true
+        ;;
+
+    *)
+        echo "Usage: asha-net-helper <tun-up|tun-down|route-up|route-down|iran-bypass-up|iran-bypass-down|killswitch-on|killswitch-off> [args...]"
+        exit 1
+        ;;
+esac

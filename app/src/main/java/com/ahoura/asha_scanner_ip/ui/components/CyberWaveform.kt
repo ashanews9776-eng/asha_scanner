@@ -57,15 +57,116 @@ fun CyberTrafficOscilloscope(
     uploadBytesPerSec: Long,
     modifier: Modifier = Modifier,
 ) {
+    if (isConnected) {
+        ActiveTrafficOscilloscope(
+            downloadBytesPerSec = downloadBytesPerSec,
+            uploadBytesPerSec = uploadBytesPerSec,
+            modifier = modifier
+        )
+    } else {
+        IdleTrafficOscilloscope(modifier = modifier)
+    }
+}
+
+@Composable
+private fun IdleTrafficOscilloscope(modifier: Modifier = Modifier) {
+    val s = LocalStrings.current
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(SurfaceC)
+            .border(0.5.dp, BorderC, RoundedCornerShape(10.dp))
+            .padding(12.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(TextMutedC)
+                    )
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        text = s.liveTrafficMonitor,
+                        color = TextSecondaryC,
+                        fontFamily = Vazirmatn,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Text(
+                    text = "STANDBY",
+                    color = TextMutedC,
+                    fontFamily = ShareTechMono,
+                    fontSize = 9.sp
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Static Zero-Power Canvas (Zero Recompositions)
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                val width = size.width
+                val height = size.height
+                val midY = height / 2f
+
+                val gridSpacing = 36.dp.toPx()
+                var gx = gridSpacing
+                while (gx < width) {
+                    drawLine(
+                        color = BorderC.copy(alpha = 0.18f),
+                        start = androidx.compose.ui.geometry.Offset(gx, 0f),
+                        end = androidx.compose.ui.geometry.Offset(gx, height),
+                        strokeWidth = 0.5.dp.toPx()
+                    )
+                    gx += gridSpacing
+                }
+                drawLine(
+                    color = BorderC.copy(alpha = 0.25f),
+                    start = androidx.compose.ui.geometry.Offset(0f, midY),
+                    end = androidx.compose.ui.geometry.Offset(width, midY),
+                    strokeWidth = 0.5.dp.toPx()
+                )
+                drawLine(
+                    color = TextMutedC.copy(alpha = 0.35f),
+                    start = androidx.compose.ui.geometry.Offset(0f, midY),
+                    end = androidx.compose.ui.geometry.Offset(width, midY),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveTrafficOscilloscope(
+    downloadBytesPerSec: Long,
+    uploadBytesPerSec: Long,
+    modifier: Modifier = Modifier,
+) {
     val s = LocalStrings.current
     val lang = LocalLang.current
 
+    val hasTraffic = downloadBytesPerSec > 0 || uploadBytesPerSec > 0
     val transition = rememberInfiniteTransition(label = "traffic_wave")
     val phase by transition.animateFloat(
         initialValue = 0f,
         targetValue = 2f * PI.toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(if (isConnected) 2400 else 6000, easing = LinearEasing),
+            animation = tween(if (hasTraffic) 2400 else 4800, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "phase"
@@ -91,7 +192,7 @@ fun CyberTrafficOscilloscope(
                         Modifier
                             .size(6.dp)
                             .clip(RoundedCornerShape(3.dp))
-                            .background(if (isConnected) Accent else TextMutedC)
+                            .background(Accent)
                     )
                     Spacer(Modifier.size(6.dp))
                     Text(
@@ -103,29 +204,20 @@ fun CyberTrafficOscilloscope(
                     )
                 }
 
-                if (isConnected) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "↓ ${formatSpeed(downloadBytesPerSec).localizeDigits(lang)}",
-                            color = Accent,
-                            fontFamily = ShareTechMono,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "↑ ${formatSpeed(uploadBytesPerSec).localizeDigits(lang)}",
-                            color = BlueC,
-                            fontFamily = ShareTechMono,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "STANDBY",
-                        color = TextMutedC,
+                        text = "↓ ${formatSpeed(downloadBytesPerSec).localizeDigits(lang)}",
+                        color = Accent,
                         fontFamily = ShareTechMono,
-                        fontSize = 9.sp
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "↑ ${formatSpeed(uploadBytesPerSec).localizeDigits(lang)}",
+                        color = BlueC,
+                        fontFamily = ShareTechMono,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
@@ -160,17 +252,6 @@ fun CyberTrafficOscilloscope(
                     end = androidx.compose.ui.geometry.Offset(width, midY),
                     strokeWidth = 0.5.dp.toPx()
                 )
-
-                if (!isConnected) {
-                    // Dim static baseline with subtle pulse
-                    drawLine(
-                        color = TextMutedC.copy(alpha = 0.35f),
-                        start = androidx.compose.ui.geometry.Offset(0f, midY),
-                        end = androidx.compose.ui.geometry.Offset(width, midY),
-                        strokeWidth = 1.dp.toPx()
-                    )
-                    return@Canvas
-                }
 
                 // Dynamic speed-reactive amplitude
                 val rxRatio = (downloadBytesPerSec / 2_000_000f).coerceIn(0f, 1f)

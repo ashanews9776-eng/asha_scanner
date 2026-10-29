@@ -35,10 +35,11 @@ object VpnManager {
     private val _stats = MutableStateFlow(VpnStats())
     val stats: StateFlow<VpnStats> = _stats.asStateFlow()
 
-    private val scope = CoroutineScope(Dispatchers.Main + Job())
+    private val scope = CoroutineScope(Dispatchers.Default + Job())
     private var durationJob: Job? = null
     private var connectedSinceMs: Long = 0L
     private var receiverRegistered = false
+    private var appContext: Context? = null
 
     const val ACTION_STATUS = "com.ahoura.asha_scanner_ip.core.guard.STATUS"
 
@@ -121,6 +122,7 @@ object VpnManager {
      * Initializes the status receiver for background and tile events.
      */
     fun init(context: Context) {
+        appContext = context.applicationContext
         if (receiverRegistered) return
         runCatching {
             val filter = IntentFilter(ACTION_STATUS)
@@ -134,6 +136,12 @@ object VpnManager {
         }.onFailure {
             android.util.Log.e("VpnManager", "Failed to register statusReceiver", it)
         }
+    }
+
+    private fun isScreenInteractive(): Boolean = try {
+        appContext?.getSystemService(android.os.PowerManager::class.java)?.isInteractive ?: true
+    } catch (_: Exception) {
+        true
     }
 
     fun updateStats(transform: (VpnStats) -> VpnStats) {
@@ -224,6 +232,10 @@ object VpnManager {
             while (isActive) {
                 delay(1000)
                 if (connectedSinceMs > 0L) {
+                    // Battery saving: when screen is non-interactive, back off updates to avoid CPU wakeups
+                    if (!isScreenInteractive()) {
+                        delay(4000)
+                    }
                     val sec = (System.currentTimeMillis() - connectedSinceMs) / 1000
                     _stats.update {
                         if (it.status == VpnStatus.CONNECTED) it.copy(connectedDurationSeconds = sec)

@@ -231,6 +231,11 @@ interface AppStrings {
     val transportShardDesc: String
     val transportCustom: String
     val transportCustomDesc: String
+    val transportAether24: String
+    val transportAether24Desc: String
+    val aether24Protocol: String
+    val aether24Fragment: String
+    val aether24TlsFingerprint: String
     val connectionSteps: String
     val scanningAddress: String
     val rejectedNotMasque: String
@@ -674,6 +679,11 @@ internal object EN : AppStrings {
     override val transportShardDesc: String = "Cloudflare edge pool & TLS fragment"
     override val transportCustom: String = "Custom Proxy"
     override val transportCustomDesc: String = "VLESS / Trojan / StormDNS + Clean IP"
+    override val transportAether24: String = "Aether v2.4"
+    override val transportAether24Desc: String = "Upstream Aether v2.4.0 core: multi-domain WARP API with fallbacks, API ClientHello fragmentation, Zero Trust certificate fix, upstream fail-fast and TLS fingerprint flags"
+    override val aether24Protocol: String = "PROTOCOL"
+    override val aether24Fragment: String = "Fragment API ClientHellos"
+    override val aether24TlsFingerprint: String = "TLS FINGERPRINT (optional — blank = core default)"
     override val connectionSteps: String = "Connection steps"
     override val scanningAddress: String = "Scanning address"
     override val rejectedNotMasque: String = "Rejected: Not a MASQUE gateway"
@@ -1117,6 +1127,11 @@ internal object FA : AppStrings {
     override val transportShardDesc: String = "استخر لبه کلودفلر همراه با فرگمنت TLS"
     override val transportCustom: String = "پروکسی سفارشی"
     override val transportCustomDesc: String = "کانفیگ‌های VLESS / تروجان / StormDNS با آی‌پی تمیز"
+    override val transportAether24: String = "ایتر v2.4"
+    override val transportAether24Desc: String = "هسته‌ی ارتقایافته‌ی Aether v2.4.0: API وارپ چنددامینیه با fallback، فرگمنت روی ClientHello های API، فیکس گواهی Zero Trust، خطای فوری upstream و فلگ‌های فینگرپرینت TLS"
+    override val aether24Protocol: String = "پروتکل"
+    override val aether24Fragment: String = "فرگمنت روی درخواست‌های API"
+    override val aether24TlsFingerprint: String = "فینگرپرینت TLS (اختیاری — خالی = پیش‌فرض هسته)"
     override val connectionSteps: String = "مراحل اتصال"
     override val scanningAddress: String = "اسکن آدرس"
     override val rejectedNotMasque: String = "این آدرس دروازه MASQUE نیست"

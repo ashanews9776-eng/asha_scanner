@@ -69,6 +69,17 @@ class AshaVpnService : GuardVpnService() {
                     val profileName = intent.getStringExtra(EXTRA_PROFILE_NAME) ?: "Proxy"
                     val explicitChained = if (intent.hasExtra(EXTRA_CHAINED)) intent.getBooleanExtra(EXTRA_CHAINED, false) else null
 
+                    if (transport == "aether24") {
+                        // Aether v2.4.0 CLI transport: its own process engine,
+                        // TUN bridged via tun2socks — completely independent of
+                        // the guard transports and the custom-profile path.
+                        stopCustomVpn()
+                        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+                        prefs.edit().putString("default_protocol", transport).apply()
+                        startAetherCliVpn(profileName)
+                        return START_NOT_STICKY
+                    }
+
                     if (transport != "custom" && rawConfig.isBlank()) {
                         // Asha Guard transport: wireguard, masque, gool, psiphon, tor, shard
                         stopCustomVpn()
@@ -83,17 +94,21 @@ class AshaVpnService : GuardVpnService() {
 
                         val isPow = transport == "pow"
                         val armed = if (explicitChained != null) {
-                            if (transport == "psiphon" || isPow) prefs.edit().putBoolean("chain_armed", explicitChained).apply()
+                            // Persist only when the user made an explicit
+                            // choice, and only for transports whose chain flag
+                            // actually means the same thing next time.
+                            if (transport == "psiphon") prefs.edit().putBoolean("chain_armed", explicitChained).apply()
                             if (transport == "tor") prefs.edit().putBoolean("tor_chain_armed", explicitChained).apply()
                             explicitChained
                         } else {
-                            if (isPow) {
-                                prefs.edit().putBoolean("chain_armed", true).apply()
-                                true
-                            } else if (transport == "tor") {
-                                TorManager.chainArmed(this)
-                            } else {
-                                prefs.getBoolean("chain_armed", false)
+                            when {
+                                // pow is a chain BY CONSTRUCTION, but that must
+                                // not leak into the user's psiphon preference:
+                                // forcing chain_armed=true here made a later
+                                // plain-Psiphon connect start chained.
+                                isPow -> true
+                                transport == "tor" -> TorManager.chainArmed(this)
+                                else -> prefs.getBoolean("chain_armed", false)
                             }
                         }
 
@@ -324,6 +339,15 @@ class AshaVpnService : GuardVpnService() {
     }
 
     private fun startCustomVpn(rawConfig: String, cleanIp: String?, profileName: String) {
+        // Fresh steps: the store is global, so a previous PoW/chain session's
+        // rows must not survive into a custom-profile connect.
+        com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore.reset()
+        com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore.update(
+            com.ahoura.asha_scanner_ip.core.guard.ConnectionPhase.STARTING,
+            progressPercent = 10,
+            detail = "Starting $profileName…",
+            outerLabel = "Custom",
+        )
         if (rawConfig.isBlank()) {
             stopCustomVpn()
             return
@@ -453,6 +477,13 @@ class AshaVpnService : GuardVpnService() {
                     throw IllegalStateException("Failed to bridge TUN to SOCKS5 via tun2socks")
                 }
 
+                // A stop that raced the establish must win, or tun2socks would
+                // re-arm after stopCustomVpn() tore it down.
+                if (!isCustomActive) {
+                    runCatching { pfd.close() }
+                    customVpnInterface = null
+                    return@launch
+                }
                 isCustomActive = true
                 customConnectedStartMs = System.currentTimeMillis()
                 sendStatus(STATUS_CONNECTED, profileName)
@@ -492,6 +523,10 @@ class AshaVpnService : GuardVpnService() {
                     stopCustomVpn()
                     break
                 }
+                // Battery saving: throttle UI duration ticks when screen is off
+                if (!isScreenInteractive()) {
+                    delay(4000)
+                }
                 val duration = (System.currentTimeMillis() - customConnectedStartMs) / 1000
                 VpnManager.updateStats {
                     if (it.status == VpnStatus.CONNECTED) {
@@ -509,13 +544,19 @@ class AshaVpnService : GuardVpnService() {
             val port = proxy.port
             val sni = proxy.effectiveSni()
             while (isActive && isCustomActive) {
+                // Battery saving: if screen is off, suspend ping measurement completely
+                // to allow cellular modem / Wi-Fi to enter low-power sleep state.
+                if (!isScreenInteractive()) {
+                    delay(30_000)
+                    continue
+                }
                 val ping = VpnManager.measurePingDirect(target, port, sni)
                 VpnManager.updateStats {
                     if (it.status == VpnStatus.CONNECTED) {
                         it.copy(pingMs = ping)
                     } else it
                 }
-                delay(5000)
+                delay(12_000) // 12s interval allows mobile radio tail state to drop to idle
             }
         }
     }
@@ -532,6 +573,9 @@ class AshaVpnService : GuardVpnService() {
         Tun2SocksManager.stop()
         XrayProcessManager.stop()
         runCatching { stormDnsManager.stop() }
+        runCatching {
+            com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.stop()
+        }
 
         runCatching { customVpnInterface?.close() }
         customVpnInterface = null
@@ -556,9 +600,96 @@ class AshaVpnService : GuardVpnService() {
         }
     }
 
+    /**
+     * Aether v2.4.0 CLI transport: run the bundled v2.4.0 core as a SOCKS
+     * process and bridge the device TUN through tun2socks pointed straight at
+     * its listener — the same data path the WOM VPN mode proved. The v2.4.0
+     * feature set (multi-domain WARP API with fallbacks, API ClientHello
+     * fragmentation, MASQUE SNI override, Zero Trust cert fix, upstream
+     * fail-fast, TLS fingerprint flags) lives entirely inside this process.
+     * Identity lives in its own file so the CLI and the JNI cores never
+     * clobber each other.
+     */
+    private fun startAetherCliVpn(profileName: String) {
+        VpnManager.updateStats {
+            it.copy(
+                status = VpnStatus.CONNECTING,
+                transport = "aether24",
+                activeProfile = null,
+                errorMessage = null,
+                detailMessage = "Starting Aether v2.4…",
+                progress = -1,
+            )
+        }
+
+        customScope.launch {
+            try {
+                val settings = SettingsStore(applicationContext)
+                val identityFile = java.io.File(filesDir, "aether-v240.toml")
+                val cliSettings = com.ahoura.asha_scanner_ip.core.aether.AetherCliConfig.fromJson(
+                    json = runCatching { settings.aether24Json.first() }.getOrDefault("{}"),
+                    identityFile = identityFile.absolutePath,
+                    socksPort = com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.SOCKS_PORT,
+                )
+                val args = com.ahoura.asha_scanner_ip.core.aether.AetherCliConfig.buildArgs(cliSettings)
+
+                val started = com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.start(
+                    applicationContext, args,
+                    com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.SOCKS_PORT,
+                )
+                if (!started) {
+                    throw IllegalStateException(
+                        com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.lastError
+                            .ifBlank { "Aether v2.4 failed to start" }
+                    )
+                }
+
+                val dnsIp = runCatching { settings.vpnDnsIp.first().trim() }.getOrDefault("1.1.1.1")
+                    .let { raw -> if (raw.matches(Regex("[0-9.]+")) || raw.matches(Regex("[0-9a-fA-F:]+"))) raw else "1.1.1.1" }
+
+                val privateAddr = Tun2SocksManager.selectPrivateAddress()
+                val builder = Builder()
+                    .setSession("Asha VPN - $profileName")
+                    .setMtu(1500)
+                    .addAddress(privateAddr.ipAddress, privateAddr.prefixLength)
+                    .addDnsServer(dnsIp)
+                    .addDnsServer("8.8.8.8")
+                    .addRoute("0.0.0.0", 0)
+                    .setBlocking(false)
+                runCatching { builder.addDisallowedApplication(packageName) }
+
+                val pfd = builder.establish() ?: throw IllegalStateException("VPN Builder.establish() returned null")
+                customVpnInterface = pfd
+
+                val bridged = Tun2SocksManager.start(pfd, com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.SOCKS_PORT)
+                if (!bridged) throw IllegalStateException("Failed to bridge TUN to SOCKS5 via tun2socks")
+
+                // A stop that raced the establish must win: without this check
+                // the coroutine would re-arm tun2socks AFTER stopCustomVpn()
+                // tore it down, leaving a live tunnel behind a "disconnected"
+                // UI until force stop.
+                if (!isCustomActive) {
+                    runCatching { pfd.close() }
+                    customVpnInterface = null
+                    return@launch
+                }
+                isCustomActive = true
+                customConnectedStartMs = System.currentTimeMillis()
+                VpnManager.updateStats { it.copy(status = VpnStatus.CONNECTED, connectedDurationSeconds = 0L, errorMessage = null) }
+                startCustomTimer()
+            } catch (e: Exception) {
+                VpnManager.updateStats {
+                    it.copy(status = VpnStatus.ERROR, errorMessage = e.message ?: "Aether v2.4 connection failed")
+                }
+                stopCustomVpn()
+            }
+        }
+    }
+
     override fun onDestroy() {
         stopCustomVpn()
         runCatching { android.system.Os.unsetenv("AETHER_ENROLL_ADDRESS") }
+        runCatching { android.system.Os.unsetenv("AETHER_API_ADDRESS") }
         runCatching { android.system.Os.unsetenv("AETHER_ECH") }
         super.onDestroy()
     }

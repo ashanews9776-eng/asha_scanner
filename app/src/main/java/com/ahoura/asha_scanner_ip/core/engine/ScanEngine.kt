@@ -378,7 +378,7 @@ class ScanEngine(
                         }
 
                         val last = lastEmit.get()
-                        if (now - last >= 100 || t == total || stopEarly.get()) {
+                        if (now - last >= 250 || t == total || stopEarly.get()) {
                             if (lastEmit.compareAndSet(last, now) || t == total || stopEarly.get()) {
                                 send(
                                     ScanProgress(

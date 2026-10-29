@@ -60,9 +60,13 @@ fun AshaApp(vm: ScanViewModel) {
     val state by vm.state.collectAsState()
     val direction = if (lang == Lang.FA) LayoutDirection.Rtl else LayoutDirection.Ltr
 
-    // Keep the living backdrop in motion only where it earns its keep — the Home
-    // first-impression, the active scan, and the VPN screen.
-    val animatedBg = current == Route.HOME || current == Route.LIVE || current == Route.VPN || current == Route.SPEEDTEST
+    val vpnStats by com.ahoura.asha_scanner_ip.core.vpn.VpnManager.stats.collectAsState()
+    val isVpnActive = vpnStats.status == com.ahoura.asha_scanner_ip.core.vpn.VpnStatus.CONNECTING ||
+                      vpnStats.status == com.ahoura.asha_scanner_ip.core.vpn.VpnStatus.CONNECTED
+
+    // Battery optimization: animate the full backdrop only during active workload (scanning or active VPN session).
+    // Idle screens freeze at a crisp static cyberpunk frame to eliminate 60fps frame loop battery drain.
+    val animatedBg = state.isScanning || current == Route.LIVE || (current == Route.VPN && isVpnActive)
 
     CompositionLocalProvider(
         LocalLayoutDirection provides direction,

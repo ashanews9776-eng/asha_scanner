@@ -22,6 +22,10 @@ class DirectThroughputValidator(
 
     private val sni = "speed.cloudflare.com"
 
+    private companion object {
+        private val BUFFER_POOL = ThreadLocal.withInitial { ByteArray(32 * 1024) }
+    }
+
     override suspend fun validate(
         result: ScanResult,
         proxy: ProxyConfig?,
@@ -58,7 +62,7 @@ class DirectThroughputValidator(
             activeSocket.outputStream.flush()
 
             val input = activeSocket.inputStream
-            val buf = ByteArray(32 * 1024)
+            val buf = BUFFER_POOL.get()
             var firstByteNs = 0L
             var headerDone = false
             var headerTail = 0          // tracks the \r\n\r\n boundary

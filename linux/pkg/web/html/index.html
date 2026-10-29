@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🛡️ Asha Scanner — Linux Desktop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Vazirmatn:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-color: #050811;
+    --surface: #0c1220;
+    --surface-light: #131b2e;
+    --card-bg: #0f172a;
+    --accent: #00ffc2;
+    --accent-glow: rgba(0, 255, 194, 0.35);
+    --accent-muted: rgba(0, 255, 194, 0.12);
+    --blue: #00d2ff;
+    --blue-glow: rgba(0, 210, 255, 0.35);
+    --orange: #ffaa00;
+    --red: #ff3366;
+    --text-primary: #e2f1ff;
+    --text-secondary: #8aa2bd;
+    --text-muted: #4f6785;
+    --border: #1a2840;
+    --border-accent: rgba(0, 255, 194, 0.4);
+    --font-fa: 'Vazirmatn', -apple-system, sans-serif;
+    --font-mono: 'Share Tech Mono', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+
+  body {
+    background-color: var(--bg-color);
+    background-image: 
+      linear-gradient(rgba(0, 255, 194, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 255, 194, 0.03) 1px, transparent 1px);
+    background-size: 36px 36px;
+    color: var(--text-primary);
+    font-family: var(--font-fa);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  body.ltr {
+    direction: ltr;
+  }
+
+  /* ── Header ── */
+  header {
+    background: rgba(12, 18, 32, 0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 100;
+  }
+
+  .logo-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-shield {
+    font-size: 24px;
+    filter: drop-shadow(0 0 8px var(--accent));
+  }
+
+  .logo-text {
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    text-shadow: 0 0 10px var(--accent-glow);
+  }
+
+  .badge-tag {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    background: var(--accent-muted);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .btn-lang {
+    background: var(--surface-light);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+  .btn-lang:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Main Layout ── */
+  main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: flex; flex-direction: column; gap: 16px; animation: fadeIn 0.25s ease-out; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Bottom Cyber Bar ── */
+  nav {
+    background: rgba(12, 18, 32, 0.95);
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-around;
+    padding: 8px 16px;
+    z-index: 100;
+  }
+
+  .nav-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    padding: 6px 16px;
+    border-radius: 6px;
+    transition: 0.2s;
+  }
+
+  .nav-btn .icon { font-size: 18px; }
+  .nav-btn.active {
+    color: var(--accent);
+    background: var(--accent-muted);
+    box-shadow: 0 0 12px var(--accent-glow);
+  }
+
+  /* ── Cards & Grid ── */
+  .cyber-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    position: relative;
+  }
+
+  .cyber-card.highlight {
+    border-color: var(--border-accent);
+    box-shadow: 0 0 16px rgba(0, 255, 194, 0.05);
+  }
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .card-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ── Arc Reactor Power Button ── */
+  .power-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 0 12px;
+  }
+
+  .arc-reactor {
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: 0.3s;
+  }
+
+  .arc-reactor::before {
+    content: '';
+    position: absolute;
+    width: 154px;
+    height: 154px;
+    border-radius: 50%;
+    border: 1px dashed var(--border);
+    animation: rotateRing 30s linear infinite;
+  }
+
+  .arc-reactor.connecting::before {
+    border-color: var(--orange);
+    animation-duration: 4s;
+  }
+
+  .arc-reactor.connected::before {
+    border-color: var(--accent);
+    animation-duration: 12s;
+    box-shadow: 0 0 20px var(--accent-glow);
+  }
+
+  @keyframes rotateRing {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .reactor-core {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background: var(--surface-light);
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: inset 0 0 15px rgba(0,0,0,0.8);
+    transition: 0.3s;
+  }
+
+  .arc-reactor.connected .reactor-core {
+    border-color: var(--accent);
+    background: rgba(0, 255, 194, 0.15);
+    box-shadow: 0 0 25px var(--accent-glow), inset 0 0 20px var(--accent);
+  }
+
+  .arc-reactor.connecting .reactor-core {
+    border-color: var(--orange);
+    background: rgba(255, 170, 0, 0.15);
+  }
+
+  .power-icon {
+    font-size: 38px;
+    color: var(--text-muted);
+    transition: 0.3s;
+  }
+
+  .arc-reactor.connected .power-icon {
+    color: var(--accent);
+    filter: drop-shadow(0 0 10px var(--accent));
+  }
+
+  .arc-reactor.connecting .power-icon {
+    color: var(--orange);
+  }
+
+  .status-text {
+    margin-top: 14px;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+  }
+
+  .status-text.connected { color: var(--accent); text-shadow: 0 0 10px var(--accent-glow); }
+  .status-text.connecting { color: var(--orange); }
+
+  /* ── Protocol Chips ── */
+  .chips-rail {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scrollbar-width: thin;
+  }
+
+  .chip {
+    background: var(--surface-light);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: 0.2s;
+  }
+
+  .chip:hover { border-color: var(--text-primary); color: var(--text-primary); }
+  .chip.active {
+    background: var(--accent-muted);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 700;
+    box-shadow: 0 0 10px var(--accent-glow);
+  }
+
+  /* ── 4-Node Hop HUD ── */
+  .hop-hud {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-top: 10px;
+  }
+
+  .hop-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+  }
+
+  .hop-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+  }
+
+  .hop-node.active .hop-icon {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
+  }
+
+  .hop-line {
+    flex: 1;
+    height: 2px;
+    background: var(--border);
+    margin: 0 8px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hop-line.pulse::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 30%;
+    height: 100%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: laserPass 1.8s infinite linear;
+  }
+
+  @keyframes laserPass {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
+  }
+
+  /* ── Telemetry Grid ── */
+  .telemetry-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .telemetry-item {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .telemetry-label { font-size: 10px; color: var(--text-muted); }
+  .telemetry-val { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--text-primary); }
+  .telemetry-val.accent { color: var(--accent); }
+
+  /* ── Toggle Switch ── */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .toggle-label { font-size: 13px; color: var(--text-primary); }
+  .toggle-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 22px;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+    background-color: var(--surface-light);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    transition: .3s;
+  }
+  .slider:before {
+    position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 2px;
+    background-color: var(--text-muted);
+    border-radius: 50%;
+    transition: .3s;
+  }
+  input:checked + .slider { background-color: var(--accent-muted); border-color: var(--accent); }
+  input:checked + .slider:before { transform: translateX(20px); background-color: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+  /* ── Scanner Section ── */
+  .scanner-grid {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 16px;
+  }
+
+  .radar-box {
+    width: 100%;
+    height: 180px;
+    background: #060a12;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  canvas { width: 100%; height: 100%; display: block; }
+
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+  input[type="text"], input[type="number"], select {
+    width: 100%;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: var(--font-mono);
+    outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+    font-weight: 800;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    transition: 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .btn-primary:hover { box-shadow: 0 0 16px var(--accent-glow); transform: translateY(-1px); }
+  .btn-danger { background: var(--red); color: #fff; }
+
+  /* ── Table ── */
+  .table-container {
+    overflow-x: auto;
+    max-height: 480px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  body[dir="rtl"] th, body[dir="rtl"] td { text-align: right; }
+  th { background: var(--surface-light); color: var(--text-muted); font-size: 10px; text-transform: uppercase; }
+  tr:hover { background: rgba(0, 255, 194, 0.03); }
+  .ip-txt { color: var(--accent); font-weight: bold; }
+  .colo-tag { background: rgba(255,183,3,0.15); color: var(--orange); padding: 2px 6px; border-radius: 4px; font-size: 10px; }
+
+  .btn-action-sm {
+    background: var(--surface-light);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+  .btn-action-sm:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── DNS Section ── */
+  .dns-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .dns-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .dns-name { font-weight: 700; font-size: 12px; }
+  .dns-ip { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+  .dns-lat { font-family: var(--font-mono); font-size: 13px; font-weight: 800; color: var(--accent); }
+
+  /* ── Presets Rail ── */
+  .preset-btn {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .preset-btn.active { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-box">
+    <span class="logo-shield">🛡️</span>
+    <span class="logo-text">ASHA SCANNER</span>
+    <span class="badge-tag">LINUX</span>
+  </div>
+  <div class="header-actions">
+    <button class="btn-lang" onclick="toggleLang()" id="lang-btn">English / فارسی</button>
+  </div>
+</header>
+
+<main>
+  <!-- ══════════════ TAB 1: VPN ══════════════ -->
+  <div class="tab-content active" id="tab-vpn">
+    <!-- Protocol Chips Rail -->
+    <div class="cyber-card">
+      <div class="chips-rail" id="protocols-rail">
+        <div class="chip active" data-proto="pow">⚡ Asha PoW</div>
+        <div class="chip" data-proto="aether24">🆕 Aether v2.4</div>
+        <div class="chip" data-proto="masque">🔷 MASQUE</div>
+        <div class="chip" data-proto="wom">🧅 WOM</div>
+        <div class="chip" data-proto="wireguard">🔑 WireGuard</div>
+        <div class="chip" data-proto="gool">🔗 GOOL</div>
+        <div class="chip" data-proto="psiphon">🧠 Psiphon</div>
+        <div class="chip" data-proto="tor">🧅 Tor</div>
+        <div class="chip" data-proto="shard">🕸 SHARD</div>
+        <div class="chip" data-proto="custom">📋 Custom Proxy</div>
+      </div>
+    </div>
+
+    <!-- Central Arc Reactor Power Button -->
+    <div class="cyber-card highlight power-section">
+      <div class="arc-reactor" id="arc-reactor" onclick="toggleVpn()">
+        <div class="reactor-core">
+          <span class="power-icon">⚡</span>
+        </div>
+      </div>
+      <div class="status-text" id="vpn-status-text">DISCONNECTED</div>
+
+      <!-- Hop HUD -->
+      <div class="hop-hud" style="width: 100%; max-width: 520px;">
+        <div class="hop-node active" id="hop-1">
+          <div class="hop-icon">📱</div>
+          <span id="hop-label-1">Device</span>
+        </div>
+        <div class="hop-line pulse" id="hop-line-1"></div>
+        <div class="hop-node" id="hop-2">
+          <div class="hop-icon">🛡️</div>
+          <span id="hop-label-2">PoW Shield</span>
+        </div>
+        <div class="hop-line" id="hop-line-2"></div>
+        <div class="hop-node" id="hop-3">
+          <div class="hop-icon">☁️</div>
+          <span id="hop-label-3">CF Edge</span>
+        </div>
+        <div class="hop-line" id="hop-line-3"></div>
+        <div class="hop-node" id="hop-4">
+          <div class="hop-icon">🌐</div>
+          <span id="hop-label-4">Exit Gateway</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Telemetry Card -->
+    <div class="cyber-card">
+      <div class="card-header">
+        <span class="card-title">📊 وضعیت و ترافیک زنده شبکه (Live Telemetry)</span>
+      </div>
+      <div class="telemetry-row">
+        <div class="telemetry-item">
+          <span class="telemetry-label">PING</span>
+          <span class="telemetry-val accent" id="val-ping">— ms</span>
+        </div>
+        <div class="telemetry-item">
+          <span class="telemetry-label">DOWNLOAD</span>
+          <span class="telemetry-val" id="val-down">0.00 MB/s</span>
+        </div>
+        <div class="telemetry-item">
+          <span class="telemetry-label">UPLOAD</span>
+          <span class="telemetry-val" id="val-up">0.00 MB/s</span>
+        </div>
+        <div class="telemetry-item">
+          <span class="telemetry-label">LOCATION</span>
+          <span class="telemetry-val" id="val-country">🇩🇪 Germany (FRA)</span>
+        </div>
+      </div>
+
+      <!-- Live Oscilloscope Canvas -->
+      <div style="height: 60px; margin-top: 12px; background: #060a12; border-radius: 6px; border: 1px solid var(--border);">
+        <canvas id="osc-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- Options Card -->
+    <div class="cyber-card">
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">🇮🇷 دور زدن سایت‌های ایرانی (Bypass Iranian Sites)</div>
+          <div class="toggle-sub">سایت‌های بانکی، دولتی و دامنه‌های .ir از داخل تونل رد نمی‌شوند و مستقیم با آی‌پی ایران باز می‌شوند.</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggle-bypass-ir" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">🛡️ قطع خودکار اینترنت هنگام قطعی (Kill Switch)</div>
+          <div class="toggle-sub">در صورت افت ناگهانی تونل، اینترنت موقتاً مسدود می‌شود تا آی‌پی واقعی شما لو نرود.</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggle-killswitch">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ TAB 2: SCANNER ══════════════ -->
+  <div class="tab-content" id="tab-scanner">
+    <div class="scanner-grid">
+      <!-- Left Config Controls -->
+      <div class="cyber-card">
+        <div class="card-title">📡 تنظیمات رادار اسکن (Scanner Controls)</div>
+        <div class="form-group" style="margin-top: 10px;">
+          <label>تعداد آی‌پی (Count):</label>
+          <div style="display:flex; gap:6px; margin-bottom: 6px;">
+            <button class="preset-btn" onclick="setCount(100)">100</button>
+            <button class="preset-btn active" onclick="setCount(500)">500</button>
+            <button class="preset-btn" onclick="setCount(1000)">1000</button>
+            <button class="preset-btn" onclick="setCount(5000)">5000</button>
+          </div>
+          <input type="number" id="scan-count" value="500">
+        </div>
+        <div class="form-group">
+          <label>رشته‌های همزمان (Workers):</label>
+          <input type="number" id="scan-workers" value="50">
+        </div>
+        <div class="form-group">
+          <label>عمق بررسی (Probe Mode):</label>
+          <select id="scan-mode">
+            <option value="http" selected>HTTP (GET /cdn-cgi/trace + Colo Code)</option>
+            <option value="tls">TLS Handshake</option>
+            <option value="tcp">TCP Connect</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>کانفیگ پروکسی VLESS / Trojan (اختیاری):</label>
+          <input type="text" id="scan-proxy" placeholder="vless://... or trojan://...">
+        </div>
+        <div class="toggle-row" style="padding: 6px 0;">
+          <span class="toggle-label" style="font-size:11px;">تست سرعت فاز ۲ (Speed Test)</span>
+          <label class="switch">
+            <input type="checkbox" id="scan-speedtest" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row" style="padding: 6px 0;">
+          <span class="toggle-label" style="font-size:11px;">شکستن پکت‌ها (Anti-DPI Fragment)</span>
+          <label class="switch">
+            <input type="checkbox" id="scan-fragment" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row" style="padding: 6px 0; border:none;">
+          <span class="toggle-label" style="font-size:11px;">حالت ملایم (Gentle: 40 pps)</span>
+          <label class="switch">
+            <input type="checkbox" id="scan-gentle">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <button class="btn-primary" id="btn-radar" style="width: 100%; margin-top: 10px;" onclick="toggleRadar()">
+          <span>⚡</span> <span id="radar-btn-txt">شروع اسکن رادار</span>
+        </button>
+      </div>
+
+      <!-- Right Visual Radar & Live Table -->
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div class="cyber-card" style="padding:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span class="card-title" id="scan-phase-badge">RADAR STANDBY</span>
+            <span id="scan-tested-txt" style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">0 / 0 (FOUND: 0)</span>
+          </div>
+          <div class="radar-box">
+            <canvas id="radar-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- Results Table -->
+        <div class="cyber-card" style="padding:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span class="card-title">🏆 بهترین آی‌پی‌های تمیز کشف‌شده</span>
+            <div style="display:flex; gap:6px;">
+              <button class="btn-action-sm" onclick="exportData('csv')">CSV</button>
+              <button class="btn-action-sm" onclick="exportData('json')">JSON</button>
+              <button class="btn-action-sm" onclick="exportData('ips')">کپی لیست</button>
+            </div>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>آی‌پی و پورت</th>
+                  <th>میانگین (MS)</th>
+                  <th>جیتر</th>
+                  <th>پکت‌لاس</th>
+                  <th>سرعت دانلود</th>
+                  <th>دیتاسنتر</th>
+                  <th>عملیات</th>
+                </tr>
+              </thead>
+              <tbody id="scan-tbody">
+                <tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:30px;">آماده اسکن. دکمه «شروع اسکن رادار» را بزنید.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ TAB 3: DNS TUNER ══════════════ -->
+  <div class="tab-content" id="tab-dns">
+    <div class="cyber-card">
+      <div class="card-header">
+        <span class="card-title">🌐 تیونر DNS — اندازه‌گیری و انتخاب سریع‌ترین رزالورها</span>
+        <button class="btn-primary" onclick="testDns()">
+          <span>⚡</span> تست همه DNSها
+        </button>
+      </div>
+      <div class="dns-list" id="dns-container">
+        <!-- Rendered via JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ TAB 4: ABOUT ══════════════ -->
+  <div class="tab-content" id="tab-about">
+    <div class="cyber-card">
+      <div class="card-title">🛡️ درباره Asha Scanner (نسخه لینوکس)</div>
+      <p style="font-size: 13px; line-height: 1.8; color: var(--text-secondary); margin-top: 10px;">
+        اسکنر آشا یک ابزار بومی، متن‌باز و پرقدرت است که به‌طور ویژه برای آزادی دسترسی به اطلاعات در شبکه‌های تحت محدودیت شدید طراحی شده است. این اپلیکیشن سریع‌ترین آی‌پی‌های لبه کلودفلر را یافته و یک تونل ایمن با پروتکل‌های ضد فیلتر روی لینوکس راه‌اندازی می‌کند.
+      </p>
+      <div style="margin-top: 16px; display:flex; gap: 10px;">
+        <a href="https://t.me/asha_news2" target="_blank" class="btn-primary" style="text-decoration:none;">📢 کانال تلگرام (@asha_news2)</a>
+        <a href="https://github.com/ashanews9776-eng/asha_scanner" target="_blank" class="btn-primary" style="text-decoration:none; background:var(--surface-light); color:var(--text-primary); border:1px solid var(--border);">💻 گیت‌هاب (GitHub)</a>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Bottom Navigation Bar -->
+<nav>
+  <button class="nav-btn active" onclick="switchTab('vpn', this)">
+    <span class="icon">🛡️</span>
+    <span class="label">VPN</span>
+  </button>
+  <button class="nav-btn" onclick="switchTab('scanner', this)">
+    <span class="icon">📡</span>
+    <span class="label">اسکنر</span>
+  </button>
+  <button class="nav-btn" onclick="switchTab('dns', this)">
+    <span class="icon">🌐</span>
+    <span class="label">DNS</span>
+  </button>
+  <button class="nav-btn" onclick="switchTab('about', this)">
+    <span class="icon">ℹ️</span>
+    <span class="label">درباره</span>
+  </button>
+</nav>
+
+<script>
+let currentLang = 'fa';
+let selectedProtocol = 'pow';
+let vpnConnected = false;
+let connectingNow = false;
+let isScanning = false;
+let scanTimer = null;
+let telemetryTimer = null;
+
+// Tab Switching
+function switchTab(tabId, el) {
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tabId).classList.add('active');
+  el.classList.add('active');
+}
+
+// Protocol Selection
+document.querySelectorAll('#protocols-rail .chip').forEach(c => {
+  c.addEventListener('click', () => {
+    document.querySelectorAll('#protocols-rail .chip').forEach(x => x.classList.remove('active'));
+    c.classList.add('active');
+    selectedProtocol = c.getAttribute('data-proto');
+  });
+});
+
+// VPN Toggle
+function toggleVpn() {
+  const reactor = document.getElementById('arc-reactor');
+  const txt = document.getElementById('vpn-status-text');
+
+  if (vpnConnected || connectingNow) {
+    // Cancel: works both for a live tunnel and for a connect in progress.
+    connectingNow = false;
+    vpnConnected = false;
+    fetch('/api/vpn/disconnect', {method:'POST'}).then(() => {
+      reactor.className = 'arc-reactor';
+      txt.innerText = 'DISCONNECTED';
+      txt.className = 'status-text';
+      updateHops(false);
+    });
+  } else {
+    connectingNow = true;
+    reactor.className = 'arc-reactor connecting';
+    txt.innerText = 'CONNECTING...';
+    txt.className = 'status-text connecting';
+
+    const payload = {
+      protocol: selectedProtocol,
+      cleanIp: "",
+      proxyLink: document.getElementById('scan-proxy').value.trim(),
+      bypassIran: document.getElementById('toggle-bypass-ir').checked,
+      killSwitch: document.getElementById('toggle-killswitch').checked
+    };
+
+    fetch('/api/vpn/connect', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(r => r.json()).then(data => {
+      if (data.status === 'connecting') {
+        // The poll loop drives the reactor to its final state.
+        return;
+      }
+      connectingNow = false;
+      if (data.status === 'connected') {
+        vpnConnected = true;
+        reactor.className = 'arc-reactor connected';
+        txt.innerText = data.message ? ('CONNECTED (' + data.message + ')') : 'CONNECTED';
+        txt.className = 'status-text connected';
+        updateHops(true);
+      } else {
+        reactor.className = 'arc-reactor';
+        txt.innerText = 'ERROR: ' + (data.message || 'FAILED');
+        txt.className = 'status-text error';
+      }
+    });
+  }
+}
+
+function updateHops(connected) {
+  for (let i = 1; i <= 4; i++) {
+    const node = document.getElementById('hop-' + i);
+    if (connected) node.classList.add('active');
+    else if (i > 1) node.classList.remove('active');
+  }
+}
+
+// Telemetry Polling & Oscilloscope + live connection state
+function pollTelemetry() {
+  fetch('/api/vpn/status').then(r => r.json()).then(data => {
+    const reactor = document.getElementById('arc-reactor');
+    const txt = document.getElementById('status-text');
+    if (!reactor || !txt) return;
+
+    if (data.status === 'CONNECTED' && !vpnConnected) {
+      // Async connect finished — flip to the connected UI from the poll.
+      vpnConnected = true;
+      reactor.className = 'arc-reactor connected';
+      txt.innerText = 'CONNECTED (' + (data.message || 'Tunnel up') + ')';
+      txt.className = 'status-text connected';
+      updateHops(true);
+    } else if (data.status === 'ERROR' && !vpnConnected && connectingNow) {
+      connectingNow = false;
+      reactor.className = 'arc-reactor';
+      txt.innerText = 'ERROR: ' + (data.message || 'FAILED');
+      txt.className = 'status-text error';
+    } else if (data.status === 'CONNECTING' && connectingNow && data.message) {
+      // Live progress detail (Establishing tunnel… / routing…).
+      txt.innerText = 'CONNECTING — ' + data.message;
+    }
+
+    if (data.status === 'CONNECTED') {
+      document.getElementById('val-ping').innerText = data.ping + ' ms';
+      document.getElementById('val-down').innerText = (data.speedDown / 1000000).toFixed(2) + ' MB/s';
+      document.getElementById('val-up').innerText = (data.speedUp / 1000000).toFixed(2) + ' MB/s';
+      document.getElementById('val-country').innerText = data.exitCountry;
+    }
+  });
+}
+setInterval(pollTelemetry, 1500);
+
+// Oscilloscope Canvas Animation
+const oscCanvas = document.getElementById('osc-canvas');
+const oscCtx = oscCanvas.getContext('2d');
+let oscAngle = 0;
+function drawOsc() {
+  const w = oscCanvas.width = oscCanvas.offsetWidth;
+  const h = oscCanvas.height = oscCanvas.offsetHeight;
+  oscCtx.clearRect(0, 0, w, h);
+  oscCtx.strokeStyle = vpnConnected ? '#00ffc2' : '#4f6785';
+  oscCtx.lineWidth = 1.5;
+  oscCtx.beginPath();
+  const amp = vpnConnected ? 14 : 3;
+  for (let x = 0; x < w; x++) {
+    const y = h/2 + Math.sin((x * 0.05) + oscAngle) * amp * Math.cos((x * 0.01) + oscAngle*0.5);
+    if (x === 0) oscCtx.moveTo(x, y);
+    else oscCtx.lineTo(x, y);
+  }
+  oscCtx.stroke();
+  oscAngle += vpnConnected ? 0.08 : 0.02;
+  requestAnimationFrame(drawOsc);
+}
+drawOsc();
+
+// 360-degree Radar Sweep Canvas
+const radarCanvas = document.getElementById('radar-canvas');
+const radarCtx = radarCanvas.getContext('2d');
+let radarAngle = 0;
+function drawRadar() {
+  const w = radarCanvas.width = radarCanvas.offsetWidth;
+  const h = radarCanvas.height = radarCanvas.offsetHeight;
+  const cx = w / 2;
+  const cy = h / 2;
+  const r = Math.min(cx, cy) - 10;
+
+  radarCtx.clearRect(0, 0, w, h);
+
+  // Concentric Rings
+  radarCtx.strokeStyle = 'rgba(0, 255, 194, 0.15)';
+  radarCtx.lineWidth = 1;
+  radarCtx.beginPath();
+  radarCtx.arc(cx, cy, r * 0.33, 0, 2*Math.PI);
+  radarCtx.arc(cx, cy, r * 0.66, 0, 2*Math.PI);
+  radarCtx.arc(cx, cy, r, 0, 2*Math.PI);
+  radarCtx.stroke();
+
+  // Crosshairs
+  radarCtx.beginPath();
+  radarCtx.moveTo(cx - r, cy); radarCtx.lineTo(cx + r, cy);
+  radarCtx.moveTo(cx, cy - r); radarCtx.lineTo(cx, cy + r);
+  radarCtx.stroke();
+
+  // Sweep Line
+  if (isScanning) {
+    radarCtx.save();
+    radarCtx.translate(cx, cy);
+    radarCtx.rotate(radarAngle);
+    const grad = radarCtx.createLinearGradient(0, 0, r, 0);
+    grad.addColorStop(0, 'rgba(0, 255, 194, 0)');
+    grad.addColorStop(1, 'rgba(0, 255, 194, 0.8)');
+    radarCtx.strokeStyle = grad;
+    radarCtx.lineWidth = 2;
+    radarCtx.beginPath();
+    radarCtx.moveTo(0, 0);
+    radarCtx.lineTo(r, 0);
+    radarCtx.stroke();
+    radarCtx.restore();
+    radarAngle += 0.04;
+  }
+
+  requestAnimationFrame(drawRadar);
+}
+drawRadar();
+
+// Radar Toggle
+function toggleRadar() {
+  if (isScanning) {
+    fetch('/api/scan/stop', {method:'POST'}).then(() => {
+      isScanning = false;
+      document.getElementById('radar-btn-txt').innerText = 'شروع اسکن رادار';
+      document.getElementById('btn-radar').className = 'btn-primary';
+    });
+    return;
+  }
+
+  const payload = {
+    count: parseInt(document.getElementById('scan-count').value) || 500,
+    concurrency: parseInt(document.getElementById('scan-workers').value) || 50,
+    mode: document.getElementById('scan-mode').value,
+    speedTest: document.getElementById('scan-speedtest').checked,
+    fragment: document.getElementById('scan-fragment').checked,
+    gentle: document.getElementById('scan-gentle').checked,
+    proxyLink: document.getElementById('scan-proxy').value.trim()
+  };
+
+  fetch('/api/scan/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  }).then(r => r.json()).then(data => {
+    isScanning = true;
+    document.getElementById('radar-btn-txt').innerText = 'توقف اسکن';
+    document.getElementById('btn-radar').className = 'btn-primary btn-danger';
+    if (!scanTimer) scanTimer = setInterval(pollScanStatus, 800);
+  });
+}
+
+function pollScanStatus() {
+  fetch('/api/scan/status').then(r => r.json()).then(data => {
+    isScanning = data.isScanning;
+    if (!isScanning) {
+      document.getElementById('radar-btn-txt').innerText = 'شروع اسکن رادار';
+      document.getElementById('btn-radar').className = 'btn-primary';
+      if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+    }
+    const p = data.progress;
+    if (p) {
+      document.getElementById('scan-phase-badge').innerText = p.phase;
+      document.getElementById('scan-tested-txt').innerText = p.tested + ' / ' + p.total + ' (FOUND: ' + p.found + ')';
+    }
+    const items = data.results && data.results.length > 0 ? data.results : (p ? p.best : []);
+    if (items && items.length > 0) {
+      let html = '';
+      items.forEach((r, idx) => {
+        const avg = r.latenciesMs && r.latenciesMs.length ? (r.latenciesMs.reduce((a,b)=>a+b,0)/r.latenciesMs.length).toFixed(1) : '—';
+        const jitter = r.latenciesMs && r.latenciesMs.length > 1 ? (Math.max(...r.latenciesMs) - Math.min(...r.latenciesMs)) + 'ms' : '0ms';
+        const loss = r.attempts ? ((1 - (r.latenciesMs.length / r.attempts)) * 100).toFixed(0) + '%' : '0%';
+        const speed = r.speedTested ? (r.throughputBytesPerSec * 8 / 1000000).toFixed(2) + ' Mbps' : '—';
+
+        html += '<tr>' +
+          '<td class="ip-txt">' + r.ip + ':' + r.port + '</td>' +
+          '<td>' + avg + ' ms</td>' +
+          '<td>' + jitter + '</td>' +
+          '<td>' + loss + '</td>' +
+          '<td style="color:var(--accent); font-weight:bold;">' + speed + '</td>' +
+          '<td><span class="colo-tag">' + (r.colo || '—') + '</span></td>' +
+          '<td>' +
+            '<button class="btn-action-sm" onclick="connectWithCleanIp(\'' + r.ip + '\')">⚡ اتصال</button> ' +
+            '<button class="btn-action-sm" onclick="navigator.clipboard.writeText(\'' + r.ip + '\'); alert(\'Copied: ' + r.ip + '\');">📋 کپی</button>' +
+          '</td>' +
+        '</tr>';
+      });
+      document.getElementById('scan-tbody').innerHTML = html;
+    }
+  });
+}
+
+function connectWithCleanIp(ip) {
+  switchTab('vpn', document.querySelectorAll('.nav-btn')[0]);
+  const reactor = document.getElementById('arc-reactor');
+  const txt = document.getElementById('vpn-status-text');
+  connectingNow = true;
+  reactor.className = 'arc-reactor connecting';
+  txt.innerText = 'CONNECTING TO ' + ip + '...';
+
+  fetch('/api/vpn/connect', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      protocol: selectedProtocol,
+      cleanIp: ip,
+      proxyLink: document.getElementById('scan-proxy').value.trim(),
+      bypassIran: document.getElementById('toggle-bypass-ir').checked,
+      killSwitch: document.getElementById('toggle-killswitch').checked
+    })
+  }).then(r => r.json()).then(data => {
+    if (data.status === 'connecting') {
+      // The poll loop drives the reactor to its final state.
+      return;
+    }
+    connectingNow = false;
+    if (data.status === 'connected') {
+      vpnConnected = true;
+      reactor.className = 'arc-reactor connected';
+      txt.innerText = data.message ? ('CONNECTED (' + data.message + ')') : 'CONNECTED';
+      txt.className = 'status-text connected';
+      updateHops(true);
+    } else {
+      reactor.className = 'arc-reactor';
+      txt.innerText = 'ERROR: ' + (data.message || 'FAILED');
+      txt.className = 'status-text error';
+    }
+  });
+}
+
+function setCount(c) {
+  document.getElementById('scan-count').value = c;
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+function exportData(format) {
+  window.open('/api/export?format=' + format, '_blank');
+}
+
+// DNS Testing
+function testDns() {
+  const container = document.getElementById('dns-container');
+  container.innerHTML = '<div style="color:var(--text-muted); padding:20px; text-align:center; grid-column:span 2;">در حال ارسال کوئری و اندازه‌گیری تاخیر تمام رزالورها...</div>';
+
+  fetch('/api/dns/test').then(r => r.json()).then(data => {
+    let html = '';
+    data.forEach(d => {
+      html += '<div class="dns-card">' +
+        '<div>' +
+          '<div class="dns-name">' + d.name + ' <span class="badge-tag" style="font-size:9px;">' + d.category + '</span></div>' +
+          '<div class="dns-ip">' + d.ip + '</div>' +
+        '</div>' +
+        '<div style="display:flex; align-items:center; gap:8px;">' +
+          '<div class="dns-lat">' + (d.working ? d.latencyMs + ' ms' : 'TIMED OUT') + '</div>' +
+          '<button class="btn-action-sm" onclick="applyDns(\'' + d.ip + '\')">اعمال</button>' +
+        '</div>' +
+      '</div>';
+    });
+    container.innerHTML = html;
+  });
+}
+
+function applyDns(ip) {
+  fetch('/api/dns/apply', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ip: ip})
+  }).then(r => r.json()).then(data => {
+    alert('DNS تنظیم شد روی: ' + ip);
+  });
+}
+
+// Language Toggle
+function toggleLang() {
+  if (currentLang === 'fa') {
+    currentLang = 'en';
+    document.body.dir = 'ltr';
+    document.body.classList.add('ltr');
+    document.getElementById('lang-btn').innerText = 'فارسی / EN';
+  } else {
+    currentLang = 'fa';
+    document.body.dir = 'rtl';
+    document.body.classList.remove('ltr');
+    document.getElementById('lang-btn').innerText = 'English / فارسی';
+  }
+}
+</script>
+</body>
+</html>

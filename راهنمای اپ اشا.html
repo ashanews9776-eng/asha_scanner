@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>راهنمای کامل Asha Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0e12; --card:#10161d; --card2:#141c25;
+    --accent:#22e58f; --accent-dim:#1a8f5c;
+    --text:#dce5ec; --muted:#7d8b98; --border:#1e2833;
+    --warn:#f5b544; --err:#ff5f6d; --blue:#4db8ff;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:'Vazirmatn',Tahoma,sans-serif;
+    line-height:1.9; padding:24px 16px 64px;
+    max-width:860px; margin:0 auto;
+  }
+  header{text-align:center; padding:36px 0 20px}
+  header .logo{
+    display:inline-block; background:var(--accent); color:#000;
+    font-weight:800; font-size:22px; padding:8px 26px; border-radius:10px;
+    letter-spacing:1px;
+  }
+  header h1{font-size:26px; margin-top:18px; color:var(--accent)}
+  header .ver{color:var(--muted); font-size:13px; margin-top:6px}
+  nav{
+    background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:16px 20px; margin:20px 0 32px;
+  }
+  nav b{color:var(--accent); display:block; margin-bottom:8px; font-size:14px}
+  nav a{color:var(--text); text-decoration:none; font-size:14px; display:inline-block; margin:3px 2px}
+  nav a:hover{color:var(--accent)}
+  h2{
+    color:var(--accent); font-size:21px; margin:42px 0 14px;
+    padding-bottom:8px; border-bottom:1px solid var(--border);
+  }
+  h3{color:var(--text); font-size:16px; margin:22px 0 8px}
+  p{margin:10px 0; font-size:14.5px}
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:16px 18px; margin:14px 0;
+  }
+  .tip{
+    background:rgba(34,229,143,.07); border:1px solid rgba(34,229,143,.35);
+    border-radius:10px; padding:12px 16px; margin:12px 0; font-size:14px;
+  }
+  .warn{
+    background:rgba(245,181,68,.08); border:1px solid rgba(245,181,68,.4);
+    border-radius:10px; padding:12px 16px; margin:12px 0; font-size:14px;
+  }
+  .err{
+    background:rgba(255,95,109,.07); border:1px solid rgba(255,95,109,.4);
+    border-radius:10px; padding:12px 16px; margin:12px 0; font-size:14px;
+  }
+  table{width:100%; border-collapse:collapse; margin:14px 0; font-size:13.5px}
+  th{
+    background:var(--card2); color:var(--accent); text-align:right;
+    padding:9px 12px; border:1px solid var(--border); font-weight:700;
+  }
+  td{padding:9px 12px; border:1px solid var(--border); vertical-align:top}
+  tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+  ol,ul{padding-right:22px; margin:10px 0}
+  li{margin:6px 0; font-size:14.5px}
+  b.green{color:var(--accent)}
+  .step{
+    display:inline-flex; align-items:center; justify-content:center;
+    background:var(--accent); color:#000; font-weight:800;
+    width:24px; height:24px; border-radius:50%; font-size:13px; margin-left:6px;
+  }
+  code{
+    background:var(--card2); border:1px solid var(--border); border-radius:6px;
+    padding:1px 8px; font-size:13px; color:var(--blue);
+    font-family:monospace; direction:ltr; display:inline-block;
+  }
+  footer{
+    text-align:center; margin-top:52px; padding-top:24px;
+    border-top:1px solid var(--border); color:var(--muted); font-size:13px;
+  }
+  footer a{color:var(--accent); text-decoration:none}
+  @media print{
+    body{background:#fff; color:#111}
+    :root{--text:#111; --muted:#555; --border:#ccc}
+    .card,nav,th,tr:nth-child(even) td{background:#f7f7f7}
+    h2,footer a,nav b{color:#0a7a4d}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">ASHA SCANNER</span>
+  <h1>راهنمای کامل استفاده</h1>
+  <div class="ver">نسخه 0.8.6 · سازگار با اندروید ۸ به بالا</div>
+</header>
+
+<nav>
+  <b>📑 فهرست</b>
+  <a href="#install">۱. نصب</a> ·
+  <a href="#connect">۲. اتصال به VPN</a> ·
+  <a href="#manual">۳. روش‌های دستی اتصال</a> ·
+  <a href="#settings">۴. تنظیمات مهم VPN</a> ·
+  <a href="#scanner">۵. اسکنر IP</a> ·
+  <a href="#dns">۶. DNS Tuner</a> ·
+  <a href="#profiles">۷. مدیریت کانفیگ‌ها</a> ·
+  <a href="#troubleshoot">۸. عیب‌یابی</a> ·
+  <a href="#faq">۹. سوالات پرتکرار</a>
+</nav>
+
+<h2 id="install">۱) نصب</h2>
+<div class="card">
+  <p><b class="green">فایل نصبی:</b> فقط <code>asha_scanner_v0.8.6_arm64-v8a.apk</code> برای اکثر گوشی‌ها کافیه. مطمئن نیستی؟ نسخه‌ی <code>universal</code> را نصب کن.</p>
+  <ol>
+    <li>فایل APK را باز کن. اگر پیام «نصب از منابع ناشناس» آمد، اجازه بده.</li>
+    <li>اگر نسخه‌ی قبلی نصب است و خطای «App not installed» گرفتی، اول اپ قبلی را <b>حذف</b> کن و دوباره نصب کن.</li>
+    <li>هنگام اولین اتصال، دو مجوز می‌آید — هر دو لازم و بی‌خطرند:
+      <ul>
+        <li>🔐 <b>VPN</b> → «OK» بزن (ساخت تونل).</li>
+        <li>🔔 <b>Notifications</b> (اندروید ۱۳+) → اجازه بده (نمایش وضعیت اتصال و دکمه‌های قطع).</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<h2 id="connect">۲) اتصال به VPN — سریع‌ترین راه</h2>
+<div class="card">
+  <p><span class="step">1</span> به تب <b>VPN</b> برو.</p>
+  <p><span class="step">2</span> حالت <b>Smart Auto</b> فعال باشد (پیش‌فرض).</p>
+  <p><span class="step">3</span> دکمه‌ی پاور ⏻ را بزن و صبر کن تا <b>CONNECTED</b> سبز شود.</p>
+  <p>تمام! کل اینترنت گوشی از تونل عبور می‌کند. اپ خودش بهترین روش را امتحان می‌کند و اگر روشی جواب نداد، خودش به بعدی سوئیچ می‌کند.</p>
+</div>
+<div class="tip">🔌 <b>قطع کردن:</b> دوباره دکمه‌ی پاور، یا از نوتیفیکیشن <b>Disconnect</b>. گزینه‌ی <b>Pause</b> تونل را می‌بندد ولی برای برگشت سریع، <b>Reconnect</b> را نگه می‌دارد.</div>
+<div class="tip">🔔 <b>نوتیفیکیشن</b> همیشه وضعیت را نشان می‌دهد: درصد پیشرفت هنگام اتصال، بعد «VPN connected» + مدت + کشور خروج.</div>
+
+<h2 id="manual">۳) روش‌های دستی اتصال (Manual Protocols)</h2>
+<p>بالای صفحه‌ی VPN سوییچ <b>Manual Protocols</b> را بزن تا ردیف ترنسپورت‌ها بیاید. یکی را انتخاب کن و پاور را بزن:</p>
+<table>
+  <tr><th>روش</th><th>کی استفاده کنم؟</th></tr>
+  <tr><td><b>Asha PoW</b> ⚡ (پیش‌فرض)</td><td>اولین انتخاب — روی اکثر اپراتورها جواب می‌دهد.</td></tr>
+  <tr><td><b>Aether v2.4</b> 🆕</td><td>هسته‌ی جدید با تنظیمات حرفه‌ای (پایین‌تر توضیح داده شده).</td></tr>
+  <tr><td><b>MASQUE</b></td><td>اپراتورهایی که UDP را کامل نمی‌بندند.</td></tr>
+  <tr><td><b>WireGuard</b></td><td>سریع‌ترین حالت وقتی شبکه آزادتر است.</td></tr>
+  <tr><td><b>WOM</b></td><td>وایرگارد داخل MASQUE — برای فیلترینگ شدید.</td></tr>
+  <tr><td><b>GOOL</b></td><td>دو لایه وایرگارد تو در تو.</td></tr>
+  <tr><td><b>Psiphon</b></td><td>برای اپراتورهای متخاصم — <b>همراه‌اول: اول این را امتحان کن.</b></td></tr>
+  <tr><td><b>Tor</b></td><td>آخرین پناه، با پل‌های ضد فیلتر.</td></tr>
+  <tr><td><b>SHARD</b></td><td>استخر نود آماده — بدون هیچ تنظیمی، فقط یک دکمه.</td></tr>
+  <tr><td><b>Custom Proxy</b></td><td>کانفیگ خودت (VLESS / Trojan / DNS Tunnel) — از PROFILES وارد کن.</td></tr>
+</table>
+<div class="tip">💡 هر ترنسپورت که انتخاب کنی، زیرش کارت تنظیمات خودش باز می‌شود؛ مثلاً Psiphon گزینه‌ی «کشور خروجی» دارد و Tor نوع پل. همه‌چیز اختیاری است — چیزی نمی‌دانی، پیش‌فرض را بگذار.</div>
+<div class="warn">📱 <b>همراه اول (MCI)؟</b> اول Psiphon را امتحان کن، بعد SHARD. تنظیمات اپ برای همین اپراتور بهینه شده است.</div>
+
+<h2 id="settings">۴) تنظیمات مهم در صفحه‌ی VPN</h2>
+<table>
+  <tr><th>تنظیم</th><th>چه می‌کند؟</th></tr>
+  <tr><td><b>Bypass Iranian Sites</b> (روشن بماند)</td><td>سایت‌های ایرانی (بانک، دیجی‌کالا، همه‌ی <span dir="ltr">.ir</span>ها) از تونل خارج نمی‌شوند — اپ بانک با VPN هم کار می‌کند و دیتا کمتر مصرف می‌شود.</td></tr>
+  <tr><td><b>Tunnel Mode</b></td><td><b>VPN</b>: کل گوشی از تونل می‌رود (پیش‌فرض). <b>Local SOCKS5</b>: به‌جای VPN، پروکسی محلی بالا می‌آید؛ با <b>LAN Sharing</b> می‌توانید آن را روی وای‌فای به کامپیوتر هم بدهید.</td></tr>
+  <tr><td><b>Kill Switch</b></td><td>اگر تونل ناگهان قطع شود، اینترنت کل گوشی بسته می‌شود تا IP لو نرود. اگر اینترنت‌تان کامل قطع شد، اول این را خاموش کنید.</td></tr>
+  <tr><td><b>Split Tunneling (اپ‌ها)</b></td><td>انتخاب کنید کدام اپ‌ها از تونل بروند (یا نروند). مثلاً اپ بانک را Exclude کنید.</td></tr>
+  <tr><td><b>MTU Optimizer</b></td><td>اگر اتصال وصل است ولی صفحه‌ها ناقص باز می‌شوند، این دکمه را بزنید تا اندازه‌ی بسته‌ها برای اپراتور شما تنظیم شود.</td></tr>
+  <tr><td><b>Speed Test</b></td><td>سرعت واقعی داخل تونل (پینگ / دانلود / آپلود) را می‌سنجد.</td></tr>
+</table>
+
+<h2 id="scanner">۵) اسکنر — پیدا کردن IP تمیز</h2>
+<div class="card">
+  <p><span class="step">1</span> تب <b>Scanner</b> → <b>Quick Scan</b>.</p>
+  <p><span class="step">2</span> پیش‌فرض‌ها خوب‌اند (Count: 5000، Workers: 100). <b>Start Scan</b> را بزن.</p>
+  <p><span class="step">3</span> جدول زنده پر می‌شود؛ بعد از اسکن، تست سرعت خودکار روی بهترین‌ها انجام می‌شود.</p>
+  <p><span class="step">4</span> در صفحه‌ی نتایج:</p>
+  <ul>
+    <li>⚡ دکمه‌ی <b>«اتصال با این IP تمیز»</b> — بهترین IP را برمی‌دارد و مستقیم VPN را با آن وصل می‌کند.</li>
+    <li>⎘ <b>Copy</b> — کپی لیست IPها · <b>CSV/JSON/TXT</b> — خروجی کامل.</li>
+    <li>اگر قبلاً کانفیگ VLESS/Trojan در PROFILES وارد کرده باشی: <b>Copy Configs</b> لینک آماده با IP تمیز می‌دهد — فقط در کلاینت دیگر Paste کن.</li>
+  </ul>
+</div>
+<p>ستون‌های جدولی که می‌بینی: <b>AVG</b> پینگ · <b>LOSS</b> قطعی · <b>JITTER</b> نوسان · <b>SPEED</b> سرعت · <b>COLO</b> شهر دیتاسنتر (مثل MRS مس، FRA فرانکفورت).</p>
+
+<h2 id="dns">۶) DNS Tuner</h2>
+<div class="card">
+  <p><span class="step">1</span> از منو <b>DNS Tuner</b> را باز کن و <b>تست همه رزالورها</b> را بزن — شکن، ۴۰۳، بگذر، الکترو، کلادفلر و... روی شبکه‌ی خودت اندازه می‌گیرند.</p>
+  <p><span class="step">2</span> سریع‌ترین بالای لیست می‌آید؛ با یک لمس اعمال می‌شود (روی تونل VPN هم ست می‌شود).</p>
+  <p><span class="step">3</span> اگر پروفایل DNS Tunnel (StormDNS) داری: لینک <span dir="ltr">stormdns://</span> را از PROFILES وارد کن و با کارت «Connect via DNS Tunnel» وصل شو — این روش فقط با DNS کار می‌کند.</p>
+  <p><span class="step">4</span> <b>StormDNS Auto-Tune</b> (وقتی VPN خاموش است): چند تنظیم اندازه‌گیری‌شده را تست می‌کند و سریع‌ترین را برای تونل DNS ذخیره می‌کند.</p>
+</div>
+
+<h2 id="profiles">۷) مدیریت کانفیگ‌ها (PROFILES)</h2>
+<div class="card">
+  <p><span class="step">1</span> در صفحه‌ی VPN دکمه‌ی <b>PROFILES</b> را بزن.</p>
+  <p><span class="step">2</span> <b>IMPORT</b> → لینک کانفیگ را Paste کن: <span dir="ltr">vless:// · trojan:// · stormdns://</span></p>
+  <p><span class="step">3</span> اسم دلخواه بده و ذخیره کن. لمس = انتخاب · دکمه‌ی PING = تست سرعت · 🗑 = حذف.</p>
+  <p>پروفایل انتخابی، «Active Profile» صفحه‌ی VPN می‌شود.</p>
+</div>
+
+<h2 id="troubleshoot">۸) عیب‌یابی</h2>
+<table>
+  <tr><th>مشکل</th><th>راه‌حل</th></tr>
+  <tr><td>روی کانکت زدم، سریع قرمز شد</td><td>متن داخل کارت ERROR را بخوان — دلیل دقیق همان‌جاست. در Manual یک پروتکل دیگر را امتحان کن (همراه‌اول: اول Psiphon).</td></tr>
+  <tr><td>گیر «Retrieving identity» کرد</td><td>دفعه‌ی اول ثبت‌نام دستگاه طول می‌کشد (تا ۱ دقیقه). اگر تکرار شد: یک‌بار با SHARD وصل شو و برگرد.</td></tr>
+  <tr><td>«Reconnecting after the tunnel dropped»</td><td>اپ خودش دارد دوباره وصل می‌شود. اگر چند دقیقه حل نشد: Disconnect → پروتکل دیگر → دوباره وصل. Kill Switch را هم چک کن.</td></tr>
+  <tr><td>وصل است ولی اینترنت ندارد</td><td>یک سایت ایرانی باز کن — اگر باز شد مشکل از تونل است: پروتکل را عوض کن. بعد DNS Tuner را باز کن و سریع‌ترین DNS را apply کن. Kill Switch را هم خاموش کن.</td></tr>
+  <tr><td>بانکم / اپ ایرانی‌ام کار نمی‌کند</td><td>Bypass Iranian Sites روشن باشد، یا از Split Tunneling اپ بانک را Exclude کن.</td></tr>
+  <tr><td>نوتیفیکیشن نمی‌بینم</td><td>تنظیمات اندروید ← Apps ← Asha Scanner ← Notifications ← اجازه بده.</td></tr>
+  <tr><td>خطای «App not installed» هنگام آپدیت</td><td>اپ قبلی را Uninstall و دوباره نصب کن (تنظیمات ذخیره‌شده پاک می‌شود).</td></tr>
+  <tr><td>اینترنت کلاً قطع شد و برنمی‌گردد</td><td>Kill Switch فعال است — وارد اپ شو و Disconnect بزن تا آزاد شود.</td></tr>
+</table>
+
+<h2 id="faq">۹) سوالات پرتکرار</h2>
+<div class="card">
+  <p><b class="green">باتری زیاد مصرف می‌کند؟</b><br>نه — وقتی صفحه خاموش است، سنسورهای اضافی خودکار متوقف می‌شوند و پس‌زمینه‌ی متحرک فقط حین کار واقعی می‌چرخد.</p>
+  <p><b class="green">دیتای زیادی می‌سوزاند؟</b><br>تونل مثل هر VPN دیگری همه‌ی دیتا را عبور می‌دهد؛ اما Bypass Iranian Sites بخش بزرگی از ترافیک روزمره را مستقیم می‌کند و سقف هوشمند تست سرعت هم ۷۵ مگابایت است.</p>
+  <p><b class="green">امنم؟</b><br>ترافیک رمزنگاری‌شده است، بدون ثبت‌نام و بدون سرور واسطه‌ی ما — اتصال مستقیم به کلادفلر/سایفون/تور. Kill Switch هم برای قطع کامل موقع افت تونل هست.</p>
+  <p><b class="green">چطور آپدیت کنم؟</b><br>اپ خودش نسخه‌ی جدید را چک می‌کند و دیالوگ با لینک می‌آورد. اعلام‌ها در کانال تلگرام هم می‌شود.</p>
+  <p><b class="green">اطلاعاتم کجا می‌رود؟</b><br>هیچ‌جا. بدون ثبت‌نام و ایمیل؛ کانفیگ‌ها فقط روی حافظه‌ی خود گوشی ذخیره می‌شوند.</p>
+</div>
+
+<footer>
+  پشتیبانی و اعلام نسخه‌های جدید در کانال تلگرام:<br>
+  <a href="https://t.me/asha_news2" dir="ltr">@asha_news2</a><br><br>
+  Asha Scanner · با 💚 برای مردم ایران
+</footer>
+
+</body>
+</html>

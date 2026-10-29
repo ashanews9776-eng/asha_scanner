@@ -1,0 +1,16 @@
+[Desktop Entry]
+Name=Asha Scanner
+GenericName=Cloudflare Clean IP Scanner & VPN
+Comment=High-Performance Cloudflare IP Scanner & Anti-Censorship VPN Client
+Exec=/usr/local/bin/asha-linux gui
+Icon=/usr/share/icons/hicolor/256x256/apps/asha-scanner.png
+Terminal=false
+Type=Application
+Categories=Network;Security;Utility;
+Keywords=vpn;proxy;vless;trojan;cloudflare;scanner;censorship;
+StartupWMClass=asha-scanner
+Actions=tun-mode;
+
+[Desktop Action tun-mode]
+Name=Run with Full TUN Mode (Root)
+Exec=pkexec /usr/local/bin/asha-linux gui

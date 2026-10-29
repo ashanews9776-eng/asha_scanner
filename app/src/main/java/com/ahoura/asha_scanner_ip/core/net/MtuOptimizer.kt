@@ -3,6 +3,7 @@ package com.ahoura.asha_scanner_ip.core.net
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
@@ -99,6 +100,7 @@ object AndroidMtuProbe {
     private val RECEIVED = Regex("(\\d+)\\s+received")
 
     fun linkMtu(context: Context): Int? = runCatching {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return@runCatching null
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return@runCatching null
         val network = cm.activeNetwork ?: return@runCatching null

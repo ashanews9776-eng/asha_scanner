@@ -11,3 +11,4 @@ build/
 *.jks
 .zcodeignore
 .kotlin/
+asha-linux

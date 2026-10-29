@@ -813,6 +813,15 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- Aether v2.4.0 CLI transport settings ----
+
+    val aether24Json: StateFlow<String> = settings.aether24Json
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "{}")
+
+    fun setAether24Json(json: String) {
+        viewModelScope.launch { settings.setAether24Json(json) }
+    }
+
     fun startStormAutoTune() {
         val s = _stormTune.value
         if (s.running) return
@@ -1264,6 +1273,8 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { subServer.start() }
 
         scanJob = viewModelScope.launch {
+            var lastPersistedTopIp: String? = null
+            var lastPersistedWarpPeers: List<String>? = null
             try {
                 engine.scan(proxy, s.scanConfig, snapshotToResume).collect { p ->
                     val url = if (subServer.isListening) subServer.getUrl() else null
@@ -1271,16 +1282,20 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                     subServer.updateResults(p.best, proxy)
                     if (p.best.isNotEmpty()) {
                         val topIp = p.best.first().ip
-                        val isWarp = com.ahoura.asha_scanner_ip.core.guard.CoreConfig.isWarpEndpoint(topIp)
-                        if (isWarp) {
-                            getApplication<android.app.Application>()
-                                .getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-                                .edit().putString("clean_ip", topIp).apply()
+                        if (topIp != lastPersistedTopIp) {
+                            lastPersistedTopIp = topIp
+                            val isWarp = com.ahoura.asha_scanner_ip.core.guard.CoreConfig.isWarpEndpoint(topIp)
+                            if (isWarp) {
+                                getApplication<android.app.Application>()
+                                    .getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+                                    .edit().putString("clean_ip", topIp).apply()
+                            }
                         }
                         val warpPeers = p.best.map { it.ip }.filter {
                             com.ahoura.asha_scanner_ip.core.guard.CoreConfig.isWarpEndpoint(it)
                         }.take(5)
-                        if (warpPeers.isNotEmpty()) {
+                        if (warpPeers != lastPersistedWarpPeers && warpPeers.isNotEmpty()) {
+                            lastPersistedWarpPeers = warpPeers
                             com.ahoura.asha_scanner_ip.core.guard.CoreConfig.ensureCleanH2Peers(
                                 getApplication(),
                                 warpPeers

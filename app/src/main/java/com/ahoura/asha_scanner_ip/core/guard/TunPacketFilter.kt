@@ -1,5 +1,6 @@
 package com.ahoura.asha_scanner_ip.core.guard
 
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.system.ErrnoException
@@ -253,12 +254,20 @@ internal object TunPacketFilter {
     }
 
     private fun setBlocking(fd: FileDescriptor, blocking: Boolean) {
-        val flags = Os.fcntlInt(fd, OsConstants.F_GETFL, 0)
-        val updated = if (blocking) {
-            flags and OsConstants.O_NONBLOCK.inv()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val flags = Os.fcntlInt(fd, OsConstants.F_GETFL, 0)
+            val updated = if (blocking) {
+                flags and OsConstants.O_NONBLOCK.inv()
+            } else {
+                flags or OsConstants.O_NONBLOCK
+            }
+            Os.fcntlInt(fd, OsConstants.F_SETFL, updated)
         } else {
-            flags or OsConstants.O_NONBLOCK
+            runCatching {
+                val method = Class.forName("libcore.io.IoUtils")
+                    .getMethod("setBlocking", FileDescriptor::class.java, Boolean::class.javaPrimitiveType)
+                method.invoke(null, fd, blocking)
+            }
         }
-        Os.fcntlInt(fd, OsConstants.F_SETFL, updated)
     }
 }

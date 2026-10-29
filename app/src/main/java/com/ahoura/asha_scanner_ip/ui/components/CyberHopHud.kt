@@ -64,31 +64,42 @@ fun CyberTrafficHopHud(
     onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val s = LocalStrings.current
-    val lang = LocalLang.current
+    if (isConnected) {
+        ActiveTrafficHopHud(
+            carrierName = carrierName,
+            exitLocation = exitLocation,
+            onClick = onClick,
+            modifier = modifier
+        )
+    } else {
+        IdleTrafficHopHud(
+            carrierName = carrierName,
+            exitLocation = exitLocation,
+            onClick = onClick,
+            modifier = modifier
+        )
+    }
+}
 
-    val transition = rememberInfiniteTransition(label = "hop_laser")
-    val laserProgress by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1800, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "laser"
-    )
+@Composable
+private fun IdleTrafficHopHud(
+    carrierName: String,
+    exitLocation: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val s = LocalStrings.current
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(SurfaceC)
-            .border(0.5.dp, if (isConnected) Accent.copy(alpha = 0.4f) else BorderC, RoundedCornerShape(10.dp))
+            .border(0.5.dp, BorderC, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
             .padding(12.dp)
     ) {
         Column {
-            // Header Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -99,7 +110,7 @@ fun CyberTrafficHopHud(
                         Modifier
                             .size(6.dp)
                             .clip(CircleShape)
-                            .background(if (isConnected) Accent else TextMutedC)
+                            .background(TextMutedC)
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
@@ -120,51 +131,150 @@ fun CyberTrafficHopHud(
 
             Spacer(Modifier.height(10.dp))
 
-            // 4 Hop Nodes with connecting lines
+            // Static 4 Hop Nodes with zero continuous animation
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Hop 1: Device
                 HopNode(
                     icon = Icons.Filled.Smartphone,
                     label = carrierName.take(12),
-                    tint = if (isConnected) Accent else TextSecondaryC,
-                    active = isConnected
+                    tint = TextSecondaryC,
+                    active = false
                 )
 
-                // Laser Line 1
-                HopConnector(progress = if (isConnected) laserProgress else -1f)
+                HopConnector(progress = -1f)
 
-                // Hop 2: Anti-DPI Shield
                 HopNode(
                     icon = Icons.Filled.Security,
                     label = "PoW Shield",
-                    tint = if (isConnected) Accent else TextSecondaryC,
-                    active = isConnected
+                    tint = TextSecondaryC,
+                    active = false
                 )
 
-                // Laser Line 2
-                HopConnector(progress = if (isConnected) ((laserProgress + 0.33f) % 1f) else -1f)
+                HopConnector(progress = -1f)
 
-                // Hop 3: Cloudflare Edge
                 HopNode(
                     icon = Icons.Filled.Cloud,
                     label = "CF Edge",
-                    tint = if (isConnected) BlueC else TextSecondaryC,
-                    active = isConnected
+                    tint = TextSecondaryC,
+                    active = false
                 )
 
-                // Laser Line 3
-                HopConnector(progress = if (isConnected) ((laserProgress + 0.66f) % 1f) else -1f)
+                HopConnector(progress = -1f)
 
-                // Hop 4: Free Internet Exit
                 HopNode(
                     icon = Icons.Filled.Public,
                     label = exitLocation.take(12),
-                    tint = if (isConnected) Accent else TextSecondaryC,
-                    active = isConnected
+                    tint = TextSecondaryC,
+                    active = false
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveTrafficHopHud(
+    carrierName: String,
+    exitLocation: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val s = LocalStrings.current
+
+    val transition = rememberInfiniteTransition(label = "hop_laser")
+    val laserProgress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "laser"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(SurfaceC)
+            .border(0.5.dp, Accent.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(12.dp)
+    ) {
+        Column {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(Accent)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = s.trafficPathTitle,
+                        color = TextPrimaryC,
+                        fontFamily = Vazirmatn,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Text(
+                    text = s.tapForInspection,
+                    color = TextMutedC,
+                    fontFamily = Vazirmatn,
+                    fontSize = 9.sp
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // 4 Hop Nodes with animated laser connectors
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HopNode(
+                    icon = Icons.Filled.Smartphone,
+                    label = carrierName.take(12),
+                    tint = Accent,
+                    active = true
+                )
+
+                HopConnector(progress = laserProgress)
+
+                HopNode(
+                    icon = Icons.Filled.Security,
+                    label = "PoW Shield",
+                    tint = Accent,
+                    active = true
+                )
+
+                HopConnector(progress = (laserProgress + 0.33f) % 1f)
+
+                HopNode(
+                    icon = Icons.Filled.Cloud,
+                    label = "CF Edge",
+                    tint = BlueC,
+                    active = true
+                )
+
+                HopConnector(progress = (laserProgress + 0.66f) % 1f)
+
+                HopNode(
+                    icon = Icons.Filled.Public,
+                    label = exitLocation.take(12),
+                    tint = Accent,
+                    active = true
                 )
             }
         }

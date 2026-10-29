@@ -80,6 +80,9 @@ object IdentityProvisioner {
     private fun checkBase(base: File, protocol: String): Boolean {
         return when (protocol.lowercase()) {
             "masque" -> isValidMasqueToml(siblingFile(base, "masque"))
+            // WOM (wg-over-masque) rides a masque identity first; the
+            // whiteaesther engine may also keep its own warp identity in base.
+            "wom" -> isValidMasqueToml(siblingFile(base, "masque")) || isValidWarpToml(base)
             // GOOL/WoW dials two WARP identities, so both halves must exist.
             "gool", "warp-in-warp", "wow" -> {
                 isValidWarpToml(base) && isValidWarpToml(siblingFile(base, "secondary"))

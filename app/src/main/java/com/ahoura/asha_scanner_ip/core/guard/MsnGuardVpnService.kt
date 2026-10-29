@@ -2123,6 +2123,9 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
     }
 
     override fun onDestroy() {
+        // The service is going away: no later notification repost may survive
+        // it, whatever late async event fires.
+        foregroundPosted = false
         cancelAutoReconnect()
         stopTorProgressPolling()
         stopTrafficPolling()
@@ -2803,7 +2806,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      * displayed instantaneous speed is averaged over a longer window, and there is
      * nobody looking at it.
      */
-    private fun isScreenInteractive(): Boolean = try {
+    protected fun isScreenInteractive(): Boolean = try {
         getSystemService(PowerManager::class.java)?.isInteractive ?: true
     } catch (_: Exception) {
         // Unknown: assume awake, i.e. keep the more responsive behaviour.
@@ -3496,7 +3499,6 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                 val shardProxy = provisionIdentityThroughShard(protocol)
                 if (shardProxy != null) {
                     runCatching {
-                        android.system.Os.setenv("AETHER_SOCKS_PROXY", shardProxy, true)
                         android.system.Os.setenv("AETHER_UPSTREAM", "socks5h://$shardProxy", true)
                         val json = JSONObject(outerConfig)
                         json.put("upstream_proxy", "socks5h://$shardProxy")
@@ -3756,6 +3758,16 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         paused.set(false)
         storedConfig = config
         currentProtocol = config.substringAfter("\"protocol\":\"").substringBefore('"').uppercase()
+        // Fresh steps for every connect: reset() used to live only in the
+        // chain path, so a manual WireGuard connect displayed the previous
+        // PoW session's steps under the wrong protocol badge.
+        ConnectionStepsStore.reset()
+        ConnectionStepsStore.update(
+            ConnectionPhase.STARTING,
+            progressPercent = 10,
+            detail = "Starting ${prettyProtocol()}…",
+            outerLabel = prettyProtocol(),
+        )
         currentVpnIp = ""
         // The country belongs to the session that just ended. Left set, the
         // notification would label a fresh tunnel with the previous exit's
@@ -3999,6 +4011,25 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
             worker.execute {
             try {
 
+                // Remove a PLACEHOLDER masque identity, if one is on disk: a
+                // masque identity is cert-bearing by definition, so a file
+                // whose certificate is empty can only be a leftover from the
+                // abandoned in-app provisioner. The core loads it, gets it
+                // rejected, and dies — the "Reconnecting after the tunnel
+                // dropped" loop. A real core-enrolled file always carries an
+                // actual certificate and is never touched here. aether.toml
+                // (wireguard) is deliberately left alone: the core legitimately
+                // writes empty cert fields for wireguard identities.
+                runCatching {
+                    val masqueFile = java.io.File(filesDir, "aether-masque.toml")
+                    if (masqueFile.exists() &&
+                        masqueFile.readText().contains("cert_pem = \"\"")
+                    ) {
+                        masqueFile.delete()
+                        ConnectionLog.record("Identity: removed placeholder aether-masque.toml (empty certificate)")
+                    }
+                }
+
                 // Resolve the deferred identity decision on this thread: the
                 // probe (and possibly raising xray) blocks, and ACTION_CONNECT
                 // calls startTunnel on the main thread.
@@ -4008,7 +4039,10 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
                     needsIdentityProxy = provisionIdentityThroughShard(currentProtocol)
                     effectiveConfig = if (needsIdentityProxy != null) {
                         runCatching {
-                            android.system.Os.setenv("AETHER_SOCKS_PROXY", needsIdentityProxy!!, true)
+                            // AETHER_UPSTREAM is the env the whiteaesther core
+                            // reads; upstream_proxy in the JSON is what the
+                            // libaether core reads. AETHER_SOCKS_PROXY is read
+                            // by NEITHER binary and was removed.
                             android.system.Os.setenv("AETHER_UPSTREAM", "socks5h://$needsIdentityProxy", true)
                             val json = JSONObject(config)
                             json.put("upstream_proxy", "socks5h://$needsIdentityProxy")
@@ -4643,6 +4677,24 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
 
         connected.set(false)
         if (notify) sendStatus(STATUS_DISCONNECTED)
+        // Native wireguard/masque/gool/chain path. The worker that called
+        // NativeCore.start() normally reaches its own stopForeground+stopSelf
+        // when the core exits — but the newer cores keep start() alive through
+        // their INTERNAL quick-reconnect, and a user disconnect could hang
+        // forever behind it ("app still running in background, must force
+        // stop"). Everything user-visible is already down above (routing,
+        // Psiphon, engines, TUN closed); so end the service here, the same way
+        // the Psiphon/SHARD/Tor branches do. The worker's late finally is
+        // fully guarded against a stop-requested session.
+        vpnModeActive.set(false)
+        NativeCore.detach()
+        tun?.close()
+        tun = null
+        if (teardownService) {
+            foregroundPosted = false
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
     }
 
     private fun rebuildKillSwitchVpn() {
@@ -4712,7 +4764,18 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
      * learned) — never a timer. See [updateTrafficNotification] for why nothing
      * periodic is allowed to call this.
      */
+    /**
+     * True while this service is (or claims to be) a foreground service. Every
+     * notification repost is gated on it: after stopForeground+stopSelf the
+     * process is still alive (the Activity keeps running), so a LATE async
+     * event calling notify() would resurrect a zombie row with no service
+     * behind it — the "notification stuck after disconnect" defect.
+     */
+    @Volatile
+    private var foregroundPosted = false
+
     private fun repostNotification() {
+        if (!foregroundPosted) return
         try {
             getSystemService(NotificationManager::class.java)
                 .notify(NOTIFICATION_ID, notification())
@@ -4732,6 +4795,16 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
     private var lastDetail: String? = null
 
     protected fun sendStatus(status: String, detail: String? = null, progress: Int = -1) {
+        // A late "connected" after the user asked to stop (an engine's internal
+        // quick-reconnect, an old controller unwinding) must never resurrect
+        // the notification or the UI — it is exactly the zombie that made a
+        // disconnected session look alive in the background. Legitimate
+        // reconnects clear stopRequested at startTunnel() entry, so they are
+        // unaffected.
+        if (status == STATUS_CONNECTED && (stopRequested.get() || userInitiatedStop.get())) {
+            ConnectionLog.record("Suppressed a late CONNECTED after a stop request")
+            return
+        }
         Log.i(LOG_TAG, "status=$status${detail?.let { " detail=$it" } ?: ""}")
         lastStatus = status
         if (detail != null) lastDetail = detail
@@ -5079,6 +5152,7 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        foregroundPosted = true
     }
 
     /**
@@ -5203,12 +5277,17 @@ open class GuardVpnService : VpnService(), NativeCore.CoreCallback, PsiphonTunne
 
         val title = when {
             failed -> "Connection failed"
+            // Pause tears the tunnel down but keeps the service: lastStatus
+            // stays CONNECTED, so without this branch the row kept claiming a
+            // live VPN that was actually paused.
+            paused.get() -> "VPN paused"
             connecting -> if (connectProgress >= 0) "Connecting… $connectProgress%" else "Connecting…"
             proxyMode -> "SOCKS proxy on ${CoreConfig.proxyListenPort(this)}"
             else -> "VPN connected"
         }
 
         val contentText = when {
+            paused.get() -> "Tap Reconnect to resume the tunnel"
             failed -> (lastDetail ?: "Tap to open the app for details").let { if (it.length > 80) it.take(77) + "…" else it }
             connecting -> (lastDetail ?: prettyProtocol()).let { if (it.length > 80) it.take(77) + "…" else it }
             else -> subtitle

@@ -22,6 +22,7 @@ class SettingsStore(private val context: Context) {
     private val keyCustomDns = stringPreferencesKey("custom_dns_resolvers")
     private val keyDnsWorkerCount = androidx.datastore.preferences.core.intPreferencesKey("dns_worker_count")
     private val keyStormPresetId = stringPreferencesKey("storm_tune_preset_id")
+    private val keyAether24 = stringPreferencesKey("aether_v24_settings")
     private val keyScanGentle = booleanPreferencesKey("scan_gentle")
     private val keyScanPhase2Only = booleanPreferencesKey("scan_phase2_only")
     private val keyScanPastedTargets = stringPreferencesKey("scan_pasted_targets")
@@ -111,6 +112,18 @@ class SettingsStore(private val context: Context) {
     suspend fun setStormPresetId(id: String) {
         runCatching {
             context.dataStore.edit { it[keyStormPresetId] = id }
+        }
+    }
+
+    // ── Aether v2.4.0 CLI transport settings (one JSON blob, one key) ──
+
+    val aether24Json: Flow<String> = safePrefsFlow.map { prefs ->
+        prefs[keyAether24] ?: "{}"
+    }
+
+    suspend fun setAether24Json(json: String) {
+        runCatching {
+            context.dataStore.edit { it[keyAether24] = json }
         }
     }
 

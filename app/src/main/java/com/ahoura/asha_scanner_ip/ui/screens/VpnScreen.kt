@@ -465,6 +465,7 @@ fun VpnScreen(
                 // ---- Manual Transport Rail Chips ----
                 val transports = listOf(
                     "pow" to s.transportPow,
+                    "aether24" to s.transportAether24,
                     "masque" to s.transportMasque,
                     "wom" to s.transportWom,
                     "wireguard" to s.transportWireguard,
@@ -635,6 +636,7 @@ fun VpnScreen(
                 s = s,
                 lang = lang,
                 vpnStatus = vpnStats.status,
+                transportLabel = selectedTransport,
             )
 
             // ---- Telemetry Stats Panel (Ping, Speed, Exit IP) ----
@@ -1287,6 +1289,10 @@ fun VpnScreen(
                             }
                         }
                     }
+                }
+
+                "aether24" -> {
+                    Aether24SettingsCard(vm = vm, fa = fa, s = s, lang = lang)
                 }
 
                 "shard" -> {
@@ -2137,25 +2143,41 @@ private fun VpnPowerButton(
     status: VpnStatus,
     onClick: () -> Unit,
 ) {
-    val haptic = LocalHapticFeedback.current
-    val lang = LocalLang.current
-    val fa = lang == Lang.FA
-    val s = stringsFor(lang)
     val isConnected = status == VpnStatus.CONNECTED
     val isConnecting = status == VpnStatus.CONNECTING || status == VpnStatus.DISCONNECTING
 
-    val primaryColor = when {
-        isConnected -> Accent
-        isConnecting -> OrangeC
-        status == VpnStatus.ERROR -> RedC
-        else -> TextSecondaryC
+    if (isConnected || isConnecting) {
+        ActiveVpnPowerButton(
+            status = status,
+            isConnecting = isConnecting,
+            isConnected = isConnected,
+            onClick = onClick,
+        )
+    } else {
+        VpnPowerButtonContent(
+            status = status,
+            isConnecting = false,
+            isConnected = false,
+            dialAngle = 0f,
+            orbitAngle = 0f,
+            pulse = 1f,
+            onClick = onClick,
+        )
     }
+}
 
+@Composable
+private fun ActiveVpnPowerButton(
+    status: VpnStatus,
+    isConnecting: Boolean,
+    isConnected: Boolean,
+    onClick: () -> Unit,
+) {
     val transition = rememberInfiniteTransition(label = "arc_reactor")
     val dialAngle by transition.animateFloat(
         initialValue = 0f, targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(if (isConnecting) 2400 else if (isConnected) 12000 else 45000, easing = LinearEasing),
+            animation = tween(if (isConnecting) 2400 else 12000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "dial_spin"
@@ -2176,6 +2198,39 @@ private fun VpnPowerButton(
         ),
         label = "pulse"
     )
+
+    VpnPowerButtonContent(
+        status = status,
+        isConnecting = isConnecting,
+        isConnected = isConnected,
+        dialAngle = dialAngle,
+        orbitAngle = orbitAngle,
+        pulse = pulse,
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun VpnPowerButtonContent(
+    status: VpnStatus,
+    isConnecting: Boolean,
+    isConnected: Boolean,
+    dialAngle: Float,
+    orbitAngle: Float,
+    pulse: Float,
+    onClick: () -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    val lang = LocalLang.current
+    val fa = lang == Lang.FA
+    val s = stringsFor(lang)
+
+    val primaryColor = when {
+        isConnected -> Accent
+        isConnecting -> OrangeC
+        status == VpnStatus.ERROR -> RedC
+        else -> TextSecondaryC
+    }
 
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -2531,10 +2586,29 @@ fun ConnectionStepsCard(
     s: AppStrings,
     lang: Lang,
     vpnStatus: VpnStatus,
+    transportLabel: String = "",
     modifier: Modifier = Modifier,
 ) {
     val fa = lang == Lang.FA
     val stepsStatus by ConnectionStepsStore.status.collectAsState()
+
+    // Badge label for the card header: the chain names its outer leg through
+    // outerLabel; every other transport falls back to its rail name here.
+    val badgeLabel = stepsStatus.outerLabel.ifBlank {
+        when (transportLabel.ifBlank { "pow" }) {
+            "pow" -> "PoW"
+            "aether24" -> "Aether v2.4"
+            "masque" -> "MASQUE"
+            "wom" -> "WOM"
+            "wireguard" -> "WireGuard"
+            "gool" -> "WARP-on-WARP"
+            "psiphon" -> "Psiphon"
+            "tor" -> "Tor"
+            "shard" -> "SHARD"
+            "custom" -> "Custom"
+            else -> transportLabel
+        }
+    }
     val isVisible = vpnStatus == VpnStatus.CONNECTING ||
         vpnStatus == VpnStatus.ERROR ||
         stepsStatus.steps.isNotEmpty()
@@ -2597,7 +2671,11 @@ fun ConnectionStepsCard(
                                 modifier = Modifier.size(10.dp),
                             )
                             Text(
-                                text = (stepsStatus.outerLabel.ifBlank { "PoW" }).uppercase(),
+                                // outerLabel is set by the chain; every other
+                                // transport must show ITS OWN name — the old
+                                // hardcoded "PoW" fallback mislabelled a manual
+                                // WireGuard connect as PoW.
+                                text = badgeLabel.uppercase(),
                                 color = Accent,
                                 fontFamily = ShareTechMono,
                                 fontSize = 9.sp,
@@ -2741,6 +2819,138 @@ private fun ConnectionStepRow(row: StepDisplayRow, fa: Boolean, lang: Lang) {
                     fontSize = 10.sp,
                     maxLines = 1,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Settings card for the Aether v2.4.0 CLI transport. Every field round-trips
+ * through one JSON blob in SettingsStore; empty optional fields emit no CLI
+ * flag at all (see AetherCliConfig).
+ */
+@Composable
+private fun Aether24SettingsCard(
+    vm: ScanViewModel,
+    fa: Boolean,
+    s: AppStrings,
+    lang: Lang,
+) {
+    val json by vm.aether24Json.collectAsState()
+    val parsed = remember(json) {
+        runCatching { org.json.JSONObject(json) }.getOrElse { org.json.JSONObject() }
+    }
+
+    fun field(key: String): String =
+        parsed.optString(key).takeIf { it != "null" }.orEmpty()
+
+    fun update(key: String, value: String) {
+        parsed.put(key, value)
+        vm.setAether24Json(parsed.toString())
+    }
+
+    fun updateBool(key: String, value: Boolean) {
+        parsed.put(key, value)
+        vm.setAether24Json(parsed.toString())
+    }
+
+    SectionLabel(s.transportAether24)
+    CyberCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                s.transportAether24Desc,
+                color = TextSecondaryC,
+                fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+            )
+
+            // ── Protocol ──
+            Text(
+                s.aether24Protocol,
+                color = TextMutedC, fontFamily = ShareTechMono, fontSize = 9.sp,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("wireguard", "masque", "gool", "mim").forEach { p ->
+                    val selected = field("protocol").ifBlank { "wireguard" } == p
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (selected) Accent.copy(alpha = 0.15f) else SurfaceC)
+                            .border(0.5.dp, if (selected) Accent else BorderC, RoundedCornerShape(4.dp))
+                            .clickable { update("protocol", p) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            p.uppercase(), color = if (selected) Accent else TextSecondaryC,
+                            fontFamily = ShareTechMono, fontSize = 10.sp,
+                        )
+                    }
+                }
+            }
+
+            KvInput("MASQUE SNI", field("masqueSni"), { update("masqueSni", it) }, placeholder = "www.cloudflare.com")
+            KvInput("API address", field("apiAddress"), { update("apiAddress", it) }, placeholder = "api.devices.cloudflare.com")
+            KvInput("API host", field("apiHost"), { update("apiHost", it) })
+            KvInput("API SNI", field("apiSni"), { update("apiSni", it) })
+            KvInput("Upstream proxy", field("upstream"), { update("upstream", it) }, placeholder = "socks5://host:port")
+            KvInput("Gateway peer", field("peer"), { update("peer", it) }, placeholder = "162.159.199.238:443")
+
+            // ── Fragmentation (default OFF per v2.4.0) ──
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    s.aether24Fragment,
+                    color = TextPrimaryC, fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                    fontSize = 11.sp, modifier = Modifier.weight(1f),
+                )
+                CyberToggle(checked = parsed.optBoolean("fragment", false), onChange = { updateBool("fragment", it) })
+            }
+            if (parsed.optBoolean("fragment", false)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(Modifier.weight(1f)) {
+                        KvInput("size", field("fragmentSize"), { v -> update("fragmentSize", v.filter { c -> c.isDigit() }) })
+                    }
+                    Box(Modifier.weight(1f)) {
+                        KvInput("delay", field("fragmentDelay"), { v -> update("fragmentDelay", v.filter { c -> c.isDigit() }) })
+                    }
+                }
+            }
+
+            // ── Zero Trust ──
+            KvInput("Team", field("team"), { update("team", it) }, placeholder = "organization")
+
+            // ── TLS fingerprint ──
+            Text(
+                s.aether24TlsFingerprint,
+                color = TextMutedC, fontFamily = ShareTechMono, fontSize = 9.sp,
+            )
+            KvInput("tls-groups", field("tlsGroups"), { update("tlsGroups", it) }, placeholder = "x25519:P-256")
+            KvInput("tls-key-shares", field("tlsKeyShares"), { update("tlsKeyShares", it) })
+            KvInput("tls-sigalgs", field("tlsSigalgs"), { update("tlsSigalgs", it) })
+            KvInput("tls13-ciphers", field("tls13Ciphers"), { update("tls13Ciphers", it) })
+            KvInput("tls-cert-compression", field("tlsCertCompression"), { update("tlsCertCompression", it) }, placeholder = "brotli")
+            KvInput("tls-alps", field("tlsAlps"), { update("tlsAlps", it) }, placeholder = "new | old")
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "GREASE sigalgs", color = TextSecondaryC,
+                    fontFamily = ShareTechMono, fontSize = 10.sp, modifier = Modifier.weight(1f),
+                )
+                CyberToggle(checked = parsed.optBoolean("enableGreaseSigalgs", false), onChange = { updateBool("enableGreaseSigalgs", it) })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "ECH GREASE", color = TextSecondaryC,
+                    fontFamily = ShareTechMono, fontSize = 10.sp, modifier = Modifier.weight(1f),
+                )
+                CyberToggle(checked = parsed.optBoolean("enableEchGrease", false), onChange = { updateBool("enableEchGrease", it) })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "TLS verify", color = TextSecondaryC,
+                    fontFamily = ShareTechMono, fontSize = 10.sp, modifier = Modifier.weight(1f),
+                )
+                CyberToggle(checked = parsed.optBoolean("tlsVerify", false), onChange = { updateBool("tlsVerify", it) })
             }
         }
     }
