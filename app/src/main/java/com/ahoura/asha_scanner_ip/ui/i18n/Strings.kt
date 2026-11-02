@@ -130,6 +130,10 @@ interface AppStrings {
     val about: String
     val aboutBlurb: String
     val telegram: String
+    // Donations
+    val supportTitle: String
+    val supportHint: String
+    val donateCopied: String
     // VPN Mode
     val vpnMode: String
     val vpnModeDesc: String
@@ -236,6 +240,14 @@ interface AppStrings {
     val aether24Protocol: String
     val aether24Fragment: String
     val aether24TlsFingerprint: String
+    val aetherKeysTitle: String
+    val aetherKeysDesc: String
+    val aetherRenewKeys: String
+    val aetherRenewing: String
+    val aetherAutoConfigs: String
+    val aetherAutoConfigsAdded: String
+    val aetherKeyReady: String
+    val aetherKeyMissing: String
     val connectionSteps: String
     val scanningAddress: String
     val rejectedNotMasque: String
@@ -563,6 +575,9 @@ internal object EN : AppStrings {
     override val aboutBlurb: String = "A native Cloudflare clean-IP scanner for restricted networks — finds fast, " +
         "reachable CF edges for VLESS / Trojan configs."
     override val telegram: String = "Telegram channel"
+    override val supportTitle: String = "SUPPORT THE PROJECT"
+    override val supportHint: String = "Tap a wallet to copy its address"
+    override val donateCopied: String = "Wallet address copied"
     override val gradeLegend: String = "QUALITY RANKING GUIDE"
     override val gamingDesc: String = "Low jitter & 0% packet loss"
     override val streamingDesc: String = "High bandwidth (15Mbps+)"
@@ -684,6 +699,14 @@ internal object EN : AppStrings {
     override val aether24Protocol: String = "PROTOCOL"
     override val aether24Fragment: String = "Fragment API ClientHellos"
     override val aether24TlsFingerprint: String = "TLS FINGERPRINT (optional — blank = core default)"
+    override val aetherKeysTitle: String = "CLOUDFLARE WARP KEYS"
+    override val aetherKeysDesc: String = "Cryptographic identities for WireGuard, MASQUE & WOM"
+    override val aetherRenewKeys: String = "Auto-Renew All Keys"
+    override val aetherRenewing: String = "Provisioning WARP keys…"
+    override val aetherAutoConfigs: String = "⚡ Auto-Add Smart Aether Profiles"
+    override val aetherAutoConfigsAdded: String = "5 Aether profiles auto-generated and added ✓"
+    override val aetherKeyReady: String = "Ready"
+    override val aetherKeyMissing: String = "Not provisioned"
     override val connectionSteps: String = "Connection steps"
     override val scanningAddress: String = "Scanning address"
     override val rejectedNotMasque: String = "Rejected: Not a MASQUE gateway"
@@ -1011,6 +1034,9 @@ internal object FA : AppStrings {
     override val aboutBlurb: String = "یک اسکنر بومی آی‌پی تمیز کلودفلر برای شبکه‌های محدود — آی‌پی‌های سریع و در دسترس کلودفلر " +
         "را برای کانفیگ‌های VLESS / Trojan پیدا می‌کند."
     override val telegram: String = "کانال تلگرام"
+    override val supportTitle: String = "حمایت از پروژه"
+    override val supportHint: String = "برای کپی آدرس، روی کیف پول بزنید"
+    override val donateCopied: String = "آدرس کیف پول کپی شد"
     override val gradeLegend: String = "راهنمای رتبه‌بندی کیفیت"
     override val gamingDesc: String = "پینگ پایدار و بدون پکت‌لاس"
     override val streamingDesc: String = "پهنای باند بالا (بیش از ۱۵Mbps)"
@@ -1132,6 +1158,14 @@ internal object FA : AppStrings {
     override val aether24Protocol: String = "پروتکل"
     override val aether24Fragment: String = "فرگمنت روی درخواست‌های API"
     override val aether24TlsFingerprint: String = "فینگرپرینت TLS (اختیاری — خالی = پیش‌فرض هسته)"
+    override val aetherKeysTitle: String = "کلیدهای امن کلودفلر (WARP)"
+    override val aetherKeysDesc: String = "هویت‌های رمزنگاری اختصاصی برای WireGuard، MASQUE و WOM"
+    override val aetherRenewKeys: String = "بروزرسانی خودکار تمامی کلیدها"
+    override val aetherRenewing: String = "در حال دریافت و تایید کلیدهای کلودفلر…"
+    override val aetherAutoConfigs: String = "⚡ ایجاد خودکار کانفیگ‌های هوشمند Aether"
+    override val aetherAutoConfigsAdded: String = "۵ کانفیگ اختصاصی Aether به‌صورت خودکار اضافه شد ✓"
+    override val aetherKeyReady: String = "فعال و آماده"
+    override val aetherKeyMissing: String = "نیاز به تولید"
     override val connectionSteps: String = "مراحل اتصال"
     override val scanningAddress: String = "اسکن آدرس"
     override val rejectedNotMasque: String = "این آدرس دروازه MASQUE نیست"

@@ -15,13 +15,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -79,8 +82,13 @@ fun ConfigManagerBottomSheet(
 
     val profiles by vm.savedProfiles.collectAsState()
     val activeProfile by vm.activeProfile.collectAsState()
+    val warpKeys by vm.warpKeysStatus.collectAsState()
+    val isRenewingKeys by vm.isRenewingWarpKeys.collectAsState()
+    val renewalMessage by vm.warpKeyRenewalMessage.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var showKeysCard by remember { mutableStateOf(false) }
+    var autoAddedNotification by remember { mutableStateOf(false) }
     var addMode by remember { mutableIntStateOf(0) } // 0 = Link, 1 = StormDNS Manual
     var inputLink by remember { mutableStateOf("") }
     var inputName by remember { mutableStateOf("") }
@@ -139,7 +147,173 @@ fun ConfigManagerBottomSheet(
                 }
             }
 
-            Spacer(Modifier.size(12.dp))
+            Spacer(Modifier.size(10.dp))
+
+            // Quick Actions Bar (Auto-Generate Aether Profiles & WARP Keys Panel)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Accent.copy(alpha = 0.12f))
+                        .border(0.5.dp, AccentBorder, RoundedCornerShape(5.dp))
+                        .clickable {
+                            vm.autoGenerateAetherConfigs()
+                            autoAddedNotification = true
+                        }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        s.aetherAutoConfigs,
+                        color = Accent,
+                        fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                    )
+                }
+
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(if (showKeysCard) AccentMuted else BlueC.copy(alpha = 0.12f))
+                        .border(0.5.dp, if (showKeysCard) AccentBorder else BlueC.copy(alpha = 0.4f), RoundedCornerShape(5.dp))
+                        .clickable {
+                            showKeysCard = !showKeysCard
+                            if (showKeysCard) vm.refreshWarpKeys()
+                        }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.VpnKey,
+                            null,
+                            tint = if (showKeysCard) Accent else BlueC,
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Spacer(Modifier.size(4.dp))
+                        Text(
+                            if (fa) "کلیدهای WARP" else "WARP KEYS",
+                            color = if (showKeysCard) Accent else BlueC,
+                            fontFamily = ShareTechMono,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.5.sp,
+                        )
+                    }
+                }
+            }
+
+            if (autoAddedNotification) {
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    s.aetherAutoConfigsAdded,
+                    color = Accent,
+                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                    fontSize = 10.sp,
+                )
+            }
+
+            // WARP Keys status card
+            if (showKeysCard) {
+                Spacer(Modifier.size(8.dp))
+                CyberCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column {
+                                Text(
+                                    s.aetherKeysTitle,
+                                    color = Accent,
+                                    fontFamily = ShareTechMono,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                )
+                                Text(
+                                    s.aetherKeysDesc,
+                                    color = TextMutedC,
+                                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                    fontSize = 9.sp,
+                                )
+                            }
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isRenewingKeys) SurfaceC else AccentMuted)
+                                    .border(0.5.dp, if (isRenewingKeys) BorderC else AccentBorder, RoundedCornerShape(4.dp))
+                                    .clickable(enabled = !isRenewingKeys) { vm.renewAllWarpKeys() }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            ) {
+                                Text(
+                                    if (isRenewingKeys) "…" else s.aetherRenewKeys,
+                                    color = if (isRenewingKeys) TextMutedC else Accent,
+                                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+
+                        if (renewalMessage.isNotBlank()) {
+                            Text(
+                                renewalMessage,
+                                color = if (isRenewingKeys) BlueC else Accent,
+                                fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                fontSize = 9.5.sp,
+                            )
+                        }
+
+                        warpKeys.forEach { key ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(SurfaceC.copy(alpha = 0.5f))
+                                    .border(0.5.dp, BorderC, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(if (key.isPresent) Accent else Color(0xFFFF5F6D))
+                                    )
+                                    Spacer(Modifier.size(6.dp))
+                                    Text(
+                                        key.type,
+                                        color = TextPrimaryC,
+                                        fontFamily = ShareTechMono,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                                Text(
+                                    if (key.isPresent) {
+                                        if (key.ipv4.isNotBlank()) key.ipv4 else key.deviceId.take(8) + "…"
+                                    } else {
+                                        s.aetherKeyMissing
+                                    },
+                                    color = if (key.isPresent) TextSecondaryC else Color(0xFFFF5F6D),
+                                    fontFamily = ShareTechMono,
+                                    fontSize = 9.sp,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.size(10.dp))
 
             // Add new profile input
             if (showAddDialog) {
@@ -201,7 +375,7 @@ fun ConfigManagerBottomSheet(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    if (fa) "پشتیبانی از vless، trojan و stormdns" else "Supports vless://, trojan://, stormdns://",
+                                    if (fa) "پشتیبانی از vless، trojan، stormdns و aether://" else "Supports vless://, trojan://, stormdns://, aether://",
                                     color = TextMutedC,
                                     fontFamily = if (fa) Vazirmatn else ShareTechMono,
                                     fontSize = 10.sp,
@@ -375,6 +549,7 @@ private fun ProfileRow(
     onDelete: () -> Unit,
     onTestPing: () -> Unit,
 ) {
+    val clipboard = LocalClipboardManager.current
     val lang = LocalLang.current
     val fa = lang == Lang.FA
     Row(
@@ -419,7 +594,11 @@ private fun ProfileRow(
                     maxLines = 1,
                 )
                 Spacer(Modifier.size(6.dp))
-                val tag = if (profile.proxy.protocol == com.ahoura.asha_scanner_ip.core.model.Protocol.STORMDNS) "DNS TUNNEL" else profile.proxy.protocol.scheme.uppercase()
+                val tag = when (profile.proxy.protocol) {
+                    com.ahoura.asha_scanner_ip.core.model.Protocol.STORMDNS -> "DNS TUNNEL"
+                    com.ahoura.asha_scanner_ip.core.model.Protocol.AETHER -> "AETHER"
+                    else -> profile.proxy.protocol.scheme.uppercase()
+                }
                 Pill(tag)
                 if (profile.proxy.fingerprint.isNotBlank()) {
                     Spacer(Modifier.size(4.dp))
@@ -462,6 +641,21 @@ private fun ProfileRow(
         }
 
         Spacer(Modifier.size(8.dp))
+
+        // Copy share link button
+        Box(
+            Modifier
+                .size(28.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .clickable {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(profile.raw))
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Filled.ContentCopy, null, tint = TextMutedC, modifier = Modifier.size(15.dp))
+        }
+
+        Spacer(Modifier.size(4.dp))
 
         // Delete button
         Box(

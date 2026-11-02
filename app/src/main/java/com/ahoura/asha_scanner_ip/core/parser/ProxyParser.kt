@@ -23,7 +23,8 @@ object ProxyParser {
             Protocol.VLESS -> parseVless(raw)
             Protocol.TROJAN -> parseTrojan(raw)
             Protocol.STORMDNS -> parseStormDns(raw)
-            else -> throw ParseException("Unsupported link. Expected vless://, trojan://, or stormdns://")
+            Protocol.AETHER -> AetherFmt.parse(raw)
+            else -> throw ParseException("Unsupported link. Expected vless://, trojan://, stormdns://, or aether://")
         }
     }
 

@@ -22,13 +22,15 @@ enum class ProbeMode(val wire: String) {
 enum class Protocol(val scheme: String) {
     VLESS("vless"),
     TROJAN("trojan"),
-    STORMDNS("stormdns");
+    STORMDNS("stormdns"),
+    AETHER("aether");
 
     companion object {
         fun fromScheme(s: String): Protocol? = when (s.lowercase()) {
             "vless" -> VLESS
             "trojan" -> TROJAN
             "stormdns", "masterdns", "cottendns" -> STORMDNS
+            "aether", "warp" -> AETHER
             else -> null
         }
     }

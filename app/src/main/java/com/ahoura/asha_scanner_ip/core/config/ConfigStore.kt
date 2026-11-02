@@ -66,6 +66,47 @@ class ConfigStore(private val context: Context) {
         return profile
     }
 
+    /**
+     * Automatically adds 5 optimized Aether v2.4 smart profiles to the store
+     * (MASQUE, WOM, WireGuard, GOOL, MIM) without requiring manual link creation.
+     */
+    suspend fun addAutoAetherProfiles(): List<VpnProfile> {
+        val templates = listOf(
+            Triple("🚀 Aether MASQUE (QUIC H3)", "masque", "aether://?protocol=masque&transport=h3&scan=balanced#Aether%20MASQUE"),
+            Triple("🛡️ Aether WOM (WireGuard over MASQUE)", "wom", "aether://?protocol=wom&transport=h3&scan=balanced#Aether%20WOM"),
+            Triple("🔑 Aether WireGuard (Anti-DPI)", "wireguard", "aether://?protocol=wg&scan=balanced#Aether%20WireGuard"),
+            Triple("🔄 Aether GOOL (WARP-in-WARP)", "gool", "aether://?protocol=gool&scan=balanced#Aether%20GOOL"),
+            Triple("🎭 Aether MIM (MASQUE-in-MASQUE)", "mim", "aether://?protocol=mim&transport=h3&scan=balanced#Aether%20MIM"),
+        )
+        val added = mutableListOf<VpnProfile>()
+        runCatching {
+            context.configDataStore.edit { prefs ->
+                val list = deserializeProfiles(prefs[keyProfilesJson] ?: "[]").toMutableList()
+                for ((title, _, uri) in templates) {
+                    if (list.none { it.name == title || it.raw == uri }) {
+                        val proxy = runCatching { ProxyParser.parse(uri) }.getOrNull() ?: continue
+                        val prof = VpnProfile(
+                            id = UUID.randomUUID().toString(),
+                            name = title,
+                            raw = uri,
+                            proxy = proxy,
+                            cleanIp = null,
+                        )
+                        list.add(prof)
+                        added.add(prof)
+                    }
+                }
+                if (added.isNotEmpty()) {
+                    prefs[keyProfilesJson] = serializeProfiles(list)
+                    if (prefs[keyActiveProfileId].isNullOrBlank()) {
+                        prefs[keyActiveProfileId] = list.firstOrNull()?.id ?: ""
+                    }
+                }
+            }
+        }
+        return added
+    }
+
     suspend fun updateProfile(profile: VpnProfile) {
         runCatching {
             context.configDataStore.edit { prefs ->

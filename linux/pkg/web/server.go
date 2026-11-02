@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/ashanews9776-eng/asha_scanner/linux/pkg/dns"
 	"github.com/ashanews9776-eng/asha_scanner/linux/pkg/parser"
@@ -28,6 +27,8 @@ type Server struct {
 	isScanning bool
 	cancelFn   context.CancelFunc
 	mu         sync.Mutex
+	tele       *Telemetry
+	teleStop   chan struct{}
 	connecting bool
 }
 
@@ -35,6 +36,7 @@ type Server struct {
 func NewServer(port int) *Server {
 	return &Server{
 		port: port,
+		tele: NewTelemetry(vpn.DefaultTunDevice, vpn.DefaultSocksPort),
 	}
 }
 
@@ -200,6 +202,7 @@ func (s *Server) handleVpnConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.vpnMgr = vpn.NewManager(opts)
+	s.tele.Restart(s.vpnMgr.SocksPort(), s.vpnMgr.TunDeviceName())
 	s.mu.Unlock()
 
 	go func() {
@@ -226,6 +229,7 @@ func (s *Server) handleVpnDisconnect(w http.ResponseWriter, r *http.Request) {
 	if s.vpnMgr != nil {
 		s.vpnMgr.Disconnect()
 	}
+	s.tele.Reset()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "disconnected"})
@@ -246,14 +250,18 @@ func (s *Server) handleVpnStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	pingMs, downBps, upBps, country := s.tele.Snapshot()
+	if pingMs == 0 && status != "CONNECTED" {
+		pingMs = 0
+	}
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":      status,
 		"durationSec": durationSec,
 		"message":     msg,
-		"ping":        38 + (time.Now().Unix()%10),
-		"speedDown":   2450000,
-		"speedUp":     820000,
-		"exitCountry": "🇩🇪 Germany (FRA)",
+		"ping":        pingMs,
+		"speedDown":   downBps,
+		"speedUp":     upBps,
+		"exitCountry": country,
 	})
 }
 

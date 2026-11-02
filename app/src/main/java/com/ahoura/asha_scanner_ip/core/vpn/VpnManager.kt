@@ -256,9 +256,17 @@ object VpnManager {
      * Measures TCP + TLS handshake delay in ms for a given profile.
      */
     suspend fun measurePing(profile: VpnProfile): Long? = withContext(Dispatchers.IO) {
-        val target = profile.targetAddress
-        val port = profile.proxy.port
-        val sni = profile.proxy.effectiveSni()
+        val target = if (profile.proxy.protocol == com.ahoura.asha_scanner_ip.core.model.Protocol.AETHER) {
+            profile.targetAddress.ifBlank { "162.159.192.1" }
+        } else {
+            profile.targetAddress
+        }
+        val port = if (profile.proxy.port > 0) profile.proxy.port else 443
+        val sni = if (profile.proxy.protocol == com.ahoura.asha_scanner_ip.core.model.Protocol.AETHER) {
+            profile.proxy.sni.ifBlank { "www.cloudflare.com" }
+        } else {
+            profile.proxy.effectiveSni()
+        }
         measurePingDirect(target, port, sni)
     }
 

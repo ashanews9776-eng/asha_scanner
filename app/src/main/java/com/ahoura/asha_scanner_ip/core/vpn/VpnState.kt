@@ -34,7 +34,10 @@ data class VpnProfile(
 
     /** Formatted address for display. */
     val displayAddress: String
-        get() = if (cleanIp != null && cleanIp != proxy.address) {
+        get() = if (proxy.protocol == com.ahoura.asha_scanner_ip.core.model.Protocol.AETHER) {
+            val proto = proxy.encryption.ifBlank { "masque" }.uppercase()
+            if (proxy.address.isNotBlank()) "${proxy.address}:${proxy.port} ($proto)" else "Auto Gateway Scan ($proto)"
+        } else if (cleanIp != null && cleanIp != proxy.address) {
             "$cleanIp (${proxy.address})"
         } else {
             "${proxy.address}:${proxy.port}"

@@ -1,5 +1,5 @@
 BINARY=asha-linux
-VERSION=0.8.7
+VERSION=0.8.8
 DESKTOP_FILE=asha-scanner.desktop
 ICON_FILE=assets/icon.png
 

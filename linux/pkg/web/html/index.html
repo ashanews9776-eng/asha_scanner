@@ -803,6 +803,14 @@
         <a href="https://t.me/asha_news2" target="_blank" class="btn-primary" style="text-decoration:none;">📢 کانال تلگرام (@asha_news2)</a>
         <a href="https://github.com/ashanews9776-eng/asha_scanner" target="_blank" class="btn-primary" style="text-decoration:none; background:var(--surface-light); color:var(--text-primary); border:1px solid var(--border);">💻 گیت‌هاب (GitHub)</a>
       </div>
+
+      <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="color: var(--accent); font-weight: 700; font-size: 14px;">❤️ حمایت از پروژه</span>
+          <span style="color: var(--text-secondary); font-size: 11px;">(برای کپی، روی آدرس بزنید)</span>
+        </div>
+        <div id="wallet-list" style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;"></div>
+      </div>
     </div>
   </div>
 </main>
@@ -829,6 +837,55 @@
 
 <script>
 let currentLang = 'fa';
+
+// ── Donation wallets (tap = copy) ──────────────────────────────────────────
+const WALLETS = [
+  {
+    id: 'trx',
+    label: 'USDT · TRC20',
+    address: 'TLfuejS4FnCaudqAveCQ9ZgdNPkoyZQ1xp',
+    color: '#ef4444',
+    svg: '<svg viewBox="0 0 32 32" width="28" height="28"><circle cx="16" cy="16" r="16" fill="#ef4444"/><path d="M22.5 11.5 9.8 6.8l-.6 8.5 7.8.9-7.4 1.9.2 7.1 12.6-6.9.1-6.8z" fill="#fff"/></svg>'
+  },
+  {
+    id: 'bnb',
+    label: 'BNB · BEP20',
+    address: '0x2172b3dec78ba72dc2dec031c803c98902d8e3cc',
+    color: '#f3ba2f',
+    svg: '<svg viewBox="0 0 32 32" width="28" height="28"><circle cx="16" cy="16" r="16" fill="#f3ba2f"/><path d="M16 8.2l2.7 2.7L16 13.6l-2.7-2.7L16 8.2zm-5.1 5.1l2.7 2.7-2.7 2.7-2.7-2.7 2.7-2.7zm10.2 0l2.7 2.7-2.7 2.7-2.7-2.7 2.7-2.7zM16 18.4l2.7 2.7-2.7 2.7-2.7-2.7 2.7-2.7zm-2.4-5.5L16 10.5l2.4 2.4-2.4 2.4-2.4-2.4zm0 5.1l2.4-2.4 2.4 2.4-2.4 2.4-2.4-2.4z" fill="#0b0e11"/></svg>'
+  },
+  {
+    id: 'ton',
+    label: 'USDT · TON',
+    address: 'UQD9343F1_0cn-pV3GrogoAnUQk953xn93koe7HAgrVy8Wcs',
+    color: '#0098ea',
+    svg: '<svg viewBox="0 0 32 32" width="28" height="28"><circle cx="16" cy="16" r="16" fill="#0098ea"/><path d="M22.7 11.2c-.4-.8-1.2-1.2-2.1-1.2H11.4c-.9 0-1.7.4-2.1 1.2-.4.8-.4 1.7 0 2.5l4.6 8.6c.4.8 1.2 1.3 2.1 1.3s1.7-.5 2.1-1.3l4.6-8.6c.4-.8.4-1.7 0-2.5zM14.9 14.9l-3.4-3.3h3.4v3.3zm1.1-3.3h4.6l-4.6 4.4v-4.4zm-.9 8.7-3.9-7.3h3.9l-1 1c-.2.2-.2.5 0 .7l.9.9v4.7zm1.5-1.9v-3l3.4 3.3c-.5.1-1 .2-1.5.2h-.9c-.4 0-.8-.2-1-.5z" fill="#fff"/></svg>'
+  }
+];
+
+function initWallets() {
+  const list = document.getElementById('wallet-list');
+  if (!list || list.childElementCount > 0) return;
+  WALLETS.forEach(w => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:8px; padding:9px 12px; cursor:pointer;';
+    row.onclick = () => {
+      navigator.clipboard.writeText(w.address).then(() => {
+        const t = row.querySelector('.copied-tag');
+        if (t) { t.style.opacity = '1'; setTimeout(() => t.style.opacity = '0', 1400); }
+      });
+    };
+    row.innerHTML = w.svg +
+      '<div style="flex:1; min-width:0;">' +
+        '<div style="color: var(--accent); font-family: monospace; font-weight:700; font-size: 12px;">' + w.label + '</div>' +
+        '<div style="color: var(--text-secondary); font-family: monospace; font-size: 10.5px; word-break: break-all; direction: ltr; text-align: left;">' + w.address + '</div>' +
+      '</div>' +
+      '<span class="copied-tag" style="color: var(--accent); font-size: 11px; opacity: 0; transition: opacity .3s;">کپی شد ✓</span>';
+    list.appendChild(row);
+  });
+}
+document.addEventListener('DOMContentLoaded', initWallets);
+if (document.readyState !== 'loading') initWallets();
 let selectedProtocol = 'pow';
 let vpnConnected = false;
 let connectingNow = false;

@@ -225,6 +225,13 @@ object XrayConfigBuilder {
                     .put("port", com.ahoura.asha_scanner_ip.core.storm.StormDnsProcessManager.SOCKS_PORT)
                 settings.put("servers", JSONArray().put(server))
             }
+            Protocol.AETHER -> {
+                outbound.put("protocol", "socks")
+                val server = JSONObject()
+                    .put("address", "127.0.0.1")
+                    .put("port", com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.SOCKS_PORT)
+                settings.put("servers", JSONArray().put(server))
+            }
         }
         outbound.put("settings", settings)
         outbound.put("streamSettings", buildStreamSettings(proxy, antiDpi))

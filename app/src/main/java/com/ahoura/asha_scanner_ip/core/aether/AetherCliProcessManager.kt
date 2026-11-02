@@ -14,10 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Runs the bundled Aether v2.4.0 CLI (`libaether_v24.so`) as a standalone
  * SOCKS process — the same exec-pattern the app already proved with
- * libxray.so. The v2.4.0 core brings the new multi-domain WARP API
- * (api.devices.cloudflare.com with fallbacks), API ClientHello fragmentation,
- * the www.cloudflare.com MASQUE SNI default, Zero Trust certificate fixes and
- * the upstream fail-fast — none of which the older JNI core understands.
+ * libxray.so.
  */
 object AetherCliProcessManager {
 
@@ -37,13 +34,24 @@ object AetherCliProcessManager {
     var lastError: String = ""
         private set
 
+    @Volatile
+    var lastSelectedEndpoint: String = ""
+        private set
+
     /** Last log lines the CLI printed — the reason it refused a flag/config. */
     private val recentOutput = ArrayDeque<String>()
+
+    // Regex matchers for endpoint auto-discovery from Aether's logs
+    private val masqueGatewayRegex = Regex("""selected MASQUE gateway (\S+)""")
+    private val wireguardEndpointRegex = Regex("""selected WireGuard endpoint (\S+)""")
+    private val goolHopsRegex = Regex("""using cloudflare edge (\S+) \(outer\) and (\S+) \(inner\)""")
+    private val mimHopsRegex = Regex("""masque-in-masque ready: (\S+) \(outer\) and (\S+) \(inner\)""")
+    private val goolOverMasqueRegex = Regex("""gool ready: masque (\S+) carries wireguard (\S+)""")
 
     private fun noteOutput(line: String) {
         synchronized(recentOutput) {
             recentOutput.addLast(line)
-            while (recentOutput.size > 8) recentOutput.removeFirst()
+            while (recentOutput.size > 12) recentOutput.removeFirst()
         }
     }
 
@@ -57,7 +65,12 @@ object AetherCliProcessManager {
         File(context.applicationInfo.nativeLibraryDir, BINARY_NAME)
 
     @Synchronized
-    fun start(context: Context, args: List<String>, socksPort: Int = SOCKS_PORT): Boolean {
+    fun start(
+        context: Context,
+        args: List<String>,
+        socksPort: Int = SOCKS_PORT,
+        onOutput: ((String) -> Unit)? = null,
+    ): Boolean {
         stop()
 
         val bin = binary(context)
@@ -68,12 +81,13 @@ object AetherCliProcessManager {
             return false
         }
         if (!bin.canExecute()) {
-            lastError = "Aether v2.4 binary is not executable (extraction disabled?)"
+            lastError = "Aether v2.4 binary is not executable"
             Log.e(TAG, lastError)
             return false
         }
 
         synchronized(recentOutput) { recentOutput.clear() }
+        lastSelectedEndpoint = ""
 
         val builder = ProcessBuilder(listOf(bin.absolutePath) + args)
         builder.directory(context.filesDir)
@@ -98,15 +112,44 @@ object AetherCliProcessManager {
                         Log.d(TAG, line)
                         noteOutput(line)
                         ConnectionLog.record("$TAG $line")
+                        onOutput?.invoke(line)
+
+                        // Check for selected endpoints
+                        when {
+                            masqueGatewayRegex.containsMatchIn(line) -> {
+                                masqueGatewayRegex.find(line)?.groupValues?.getOrNull(1)?.let {
+                                    lastSelectedEndpoint = it
+                                }
+                            }
+                            wireguardEndpointRegex.containsMatchIn(line) -> {
+                                wireguardEndpointRegex.find(line)?.groupValues?.getOrNull(1)?.let {
+                                    lastSelectedEndpoint = it
+                                }
+                            }
+                            goolOverMasqueRegex.containsMatchIn(line) -> {
+                                goolOverMasqueRegex.find(line)?.groupValues?.getOrNull(1)?.let {
+                                    lastSelectedEndpoint = it
+                                }
+                            }
+                            goolHopsRegex.containsMatchIn(line) -> {
+                                goolHopsRegex.find(line)?.groupValues?.getOrNull(1)?.let {
+                                    lastSelectedEndpoint = it
+                                }
+                            }
+                            mimHopsRegex.containsMatchIn(line) -> {
+                                mimHopsRegex.find(line)?.groupValues?.getOrNull(1)?.let {
+                                    lastSelectedEndpoint = it
+                                }
+                            }
+                        }
                     }
                 }
             } catch (_: Exception) {
             }
         }, "aether24-log").apply { isDaemon = true }.also { it.start() }
 
-        // Wait for the SOCKS listener; the CLI binds held ports at startup
-        // (v2.4.0 behaviour), so a bound port means the tunnel is coming up.
-        val deadline = System.currentTimeMillis() + 20_000L
+        // Wait for the SOCKS listener; a bound port means the tunnel is ready
+        val deadline = System.currentTimeMillis() + 35_000L
         var accepts = false
         while (System.currentTimeMillis() < deadline) {
             if (!proc.isAlive) {

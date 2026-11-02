@@ -101,6 +101,16 @@ func (m *Manager) Status() (TunnelStatus, time.Duration) {
 	return m.status, duration
 }
 
+// SocksPort exposes the active local SOCKS port for telemetry probes.
+func (m *Manager) SocksPort() int {
+	return m.opts.SocksPort
+}
+
+// TunDeviceName exposes the active TUN device for traffic counters.
+func (m *Manager) TunDeviceName() string {
+	return m.opts.TunDevice
+}
+
 // FindBinary searches for an executable in standard local and system paths.
 func FindBinary(name string) string {
 	execPath, err := os.Executable()

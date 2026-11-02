@@ -8,6 +8,9 @@ import (
 
 const DefaultTunDevice = "asha0"
 
+// DefaultSocksPort is the local SOCKS port the custom-profile path uses.
+const DefaultSocksPort = 10808
+
 // executeHelper executes asha-net-helper with privilege elevation if needed.
 func executeHelper(args ...string) error {
 	helperBin := FindBinary("asha-net-helper")

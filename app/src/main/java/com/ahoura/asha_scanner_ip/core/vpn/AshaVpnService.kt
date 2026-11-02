@@ -425,21 +425,74 @@ class AshaVpnService : GuardVpnService() {
                     if (raw.matches(Regex("[0-9.]+")) || raw.matches(Regex("[0-9a-fA-F:]+"))) raw else "1.1.1.1"
                 }
 
-                val socksPort = XrayProcessManager.DEFAULT_SOCKS_PORT
+                val socksPort = if (proxy.protocol == Protocol.AETHER) {
+                    com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.SOCKS_PORT
+                } else {
+                    XrayProcessManager.DEFAULT_SOCKS_PORT
+                }
                 val httpPort = XrayProcessManager.DEFAULT_HTTP_PORT
-                val configJson = XrayConfigBuilder.buildClientVpnJson(
-                    proxy = proxy,
-                    candidateIp = cleanIp,
-                    socksPort = socksPort,
-                    httpPort = httpPort,
-                    bypassIran = bypassIran,
-                    dnsServers = listOf(dnsIp, "8.8.8.8"),
-                    includeTun = false,
-                )
 
-                val started = XrayProcessManager.start(applicationContext, configJson, socksPort)
-                if (!started) {
-                    throw IllegalStateException("Failed to start Xray core: ${XrayProcessManager.lastError}")
+                if (proxy.protocol == Protocol.AETHER) {
+                    val aetherProto = proxy.encryption.ifBlank { "masque" }
+                    sendStatus(STATUS_CONNECTING, "Checking Cloudflare WARP credentials…")
+
+                    val keysReady = com.ahoura.asha_scanner_ip.core.aether.AetherKeyManager.ensureKeysFor(
+                        applicationContext,
+                        aetherProto,
+                    ) { msg ->
+                        sendStatus(STATUS_CONNECTING, msg)
+                        VpnManager.updateStats { s -> s.copy(detailMessage = msg) }
+                    }
+                    if (!keysReady) {
+                        throw IllegalStateException("Failed to provision Cloudflare WARP keys")
+                    }
+
+                    sendStatus(STATUS_CONNECTING, "Scanning Cloudflare gateways…")
+                    val effectivePeer = if (!cleanIp.isNullOrBlank()) {
+                        cleanIp
+                    } else if (proxy.address.isNotBlank()) {
+                        "${proxy.address}:${if (proxy.port > 0) proxy.port else 443}"
+                    } else {
+                        ""
+                    }
+
+                    val cliSettings = com.ahoura.asha_scanner_ip.core.aether.AetherCliSettings(
+                        protocol = aetherProto,
+                        socksPort = socksPort,
+                        peer = effectivePeer,
+                        scanMode = proxy.path.ifBlank { "balanced" },
+                        masqueSni = proxy.sni.ifBlank { "www.cloudflare.com" },
+                        fragment = proxy.raw.contains("fragment=1"),
+                    )
+                    val args = com.ahoura.asha_scanner_ip.core.aether.AetherCliConfig.buildArgs(cliSettings)
+
+                    val started = com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.start(
+                        applicationContext,
+                        args,
+                        socksPort,
+                    ) { line ->
+                        if (line.contains("selected") || line.contains("ready") || line.contains("connected")) {
+                            VpnManager.updateStats { s -> s.copy(detailMessage = line) }
+                        }
+                    }
+                    if (!started) {
+                        throw IllegalStateException("Aether failed to start: ${com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.lastError}")
+                    }
+                } else {
+                    val configJson = XrayConfigBuilder.buildClientVpnJson(
+                        proxy = proxy,
+                        candidateIp = cleanIp,
+                        socksPort = socksPort,
+                        httpPort = httpPort,
+                        bypassIran = bypassIran,
+                        dnsServers = listOf(dnsIp, "8.8.8.8"),
+                        includeTun = false,
+                    )
+
+                    val started = XrayProcessManager.start(applicationContext, configJson, socksPort)
+                    if (!started) {
+                        throw IllegalStateException("Failed to start Xray core: ${XrayProcessManager.lastError}")
+                    }
                 }
 
                 // Establish TUN interface
@@ -625,18 +678,44 @@ class AshaVpnService : GuardVpnService() {
         customScope.launch {
             try {
                 val settings = SettingsStore(applicationContext)
-                val identityFile = java.io.File(filesDir, "aether-v240.toml")
                 val cliSettings = com.ahoura.asha_scanner_ip.core.aether.AetherCliConfig.fromJson(
                     json = runCatching { settings.aether24Json.first() }.getOrDefault("{}"),
-                    identityFile = identityFile.absolutePath,
+                    identityFile = "",
                     socksPort = com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.SOCKS_PORT,
                 )
-                val args = com.ahoura.asha_scanner_ip.core.aether.AetherCliConfig.buildArgs(cliSettings)
+
+                sendStatus(STATUS_CONNECTING, "Checking Cloudflare WARP credentials…")
+                val keysReady = com.ahoura.asha_scanner_ip.core.aether.AetherKeyManager.ensureKeysFor(
+                    applicationContext,
+                    cliSettings.protocol,
+                ) { msg ->
+                    sendStatus(STATUS_CONNECTING, msg)
+                    VpnManager.updateStats { s -> s.copy(detailMessage = msg) }
+                }
+                if (!keysReady) {
+                    throw IllegalStateException("Failed to provision Cloudflare WARP keys")
+                }
+
+                // If no manual peer is set, inspect stored clean IP candidate
+                val cleanCandidate = if (cliSettings.peer.isNotBlank()) {
+                    cliSettings.peer
+                } else {
+                    val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+                    val storedClean = prefs.getString("clean_ip", null)?.trim().orEmpty()
+                    if (storedClean.isNotBlank() && CoreConfig.isWarpEndpoint(storedClean)) storedClean else ""
+                }
+
+                val finalSettings = cliSettings.copy(peer = cleanCandidate)
+                val args = com.ahoura.asha_scanner_ip.core.aether.AetherCliConfig.buildArgs(finalSettings)
 
                 val started = com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.start(
                     applicationContext, args,
                     com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.SOCKS_PORT,
-                )
+                ) { line ->
+                    if (line.contains("selected") || line.contains("ready") || line.contains("connected")) {
+                        VpnManager.updateStats { s -> s.copy(detailMessage = line) }
+                    }
+                }
                 if (!started) {
                     throw IllegalStateException(
                         com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.lastError

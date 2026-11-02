@@ -75,6 +75,15 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     val activeProfile: StateFlow<com.ahoura.asha_scanner_ip.core.vpn.VpnProfile?> = configStore.activeProfile
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    private val _warpKeysStatus = MutableStateFlow<List<com.ahoura.asha_scanner_ip.core.aether.AetherKeyInfo>>(emptyList())
+    val warpKeysStatus: StateFlow<List<com.ahoura.asha_scanner_ip.core.aether.AetherKeyInfo>> = _warpKeysStatus.asStateFlow()
+
+    private val _isRenewingWarpKeys = MutableStateFlow(false)
+    val isRenewingWarpKeys: StateFlow<Boolean> = _isRenewingWarpKeys.asStateFlow()
+
+    private val _warpKeyRenewalMessage = MutableStateFlow("")
+    val warpKeyRenewalMessage: StateFlow<String> = _warpKeyRenewalMessage.asStateFlow()
+
     val vpnBypassIr: StateFlow<Boolean> = settings.vpnBypassIr
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
@@ -902,6 +911,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         if (existingSnapshot != null) {
             _state.update { it.copy(resumeSnapshot = existingSnapshot) }
         }
+        refreshWarpKeys()
 
         // Load the precise Cloudflare IPv4 ranges and settings off the main thread.
         viewModelScope.launch(Dispatchers.IO) {
@@ -1452,6 +1462,38 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                 cleanIp = cleanIp,
             )
             startVpn(context, profile)
+        }
+    }
+
+    fun refreshWarpKeys() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _warpKeysStatus.value = com.ahoura.asha_scanner_ip.core.aether.AetherKeyManager.getAllKeysStatus(getApplication())
+        }
+    }
+
+    fun renewAllWarpKeys() {
+        if (_isRenewingWarpKeys.value) return
+        viewModelScope.launch {
+            _isRenewingWarpKeys.value = true
+            _warpKeyRenewalMessage.value = "در حال تولید خودکار کلیدهای کلودفلر…"
+            val ok = com.ahoura.asha_scanner_ip.core.aether.AetherKeyManager.renewAllKeys(getApplication()) { msg ->
+                _warpKeyRenewalMessage.value = msg
+            }
+            refreshWarpKeys()
+            _isRenewingWarpKeys.value = false
+            if (ok) {
+                _warpKeyRenewalMessage.value = "تمامی کلیدها با موفقیت دریافت و تأیید شدند ✓"
+            }
+        }
+    }
+
+    fun autoGenerateAetherConfigs() {
+        viewModelScope.launch {
+            configStore.addAutoAetherProfiles()
+            refreshWarpKeys()
+            // Auto-provision missing keys in background
+            com.ahoura.asha_scanner_ip.core.aether.AetherKeyManager.ensureKeysFor(getApplication(), "all")
+            refreshWarpKeys()
         }
     }
 }

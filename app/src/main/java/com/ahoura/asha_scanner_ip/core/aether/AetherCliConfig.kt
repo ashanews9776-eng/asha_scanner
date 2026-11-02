@@ -4,23 +4,18 @@ package com.ahoura.asha_scanner_ip.core.aether
  * Builds the command line for the bundled Aether v2.4.0 CLI
  * (`libaether_v24.so`, upstream CluvexStudio/Aether v2.4.0).
  *
- * Pure and unit-tested: the flag names here are the release's exact surface
- * (`--fragment` replaces the removed `--no-fragment`/`--api-fragment`,
- * `--api-address` replaces `--enroll-address`, `--masque-sni` overrides the
- * new www.cloudflare.com default). Optional values are emitted ONLY when the
- * user supplied them, so an unset option can never send an unknown/empty
- * argument that would make the CLI exit at startup.
- *
- * Identity lives in its own file ([identityFile]) — deliberately separate from
- * the JNI core's aether.toml/uac-pow.toml, so CLI and JNI identities can never
- * clobber each other.
+ * Supports WireGuard, MASQUE, WOM (WireGuard over MASQUE), GOOL (WARP-in-WARP),
+ * and MIM (MASQUE-in-MASQUE), with auto-scan (`--scan balanced`) and fast
+ * gateway reconnect (`--quick-reconnect`).
  */
 data class AetherCliSettings(
-    val protocol: String = "wireguard",          // wireguard | masque | gool | mim
+    val protocol: String = "wireguard",          // wireguard | masque | wom | gool | mim
     val socksPort: Int = 10822,
-    val identityFile: String = "",
+    val identityFile: String = "",               // Optional specific file; empty = automatic from working directory
     val upstream: String = "",                   // full URI, e.g. socks5://host:port
-    val peer: String = "",                       // gateway endpoint override
+    val peer: String = "",                       // gateway endpoint override (empty = auto gateway scan if scanMode set)
+    val scanMode: String = "",                   // turbo | balanced | thorough | verified | ironclad
+    val quickReconnect: Boolean = false,
     val apiAddress: String = "",                 // host or host:port (--api-address)
     val apiHost: String = "",                    // SNI-less host (--api-host)
     val apiSni: String = "",                     // --api-sni
@@ -38,23 +33,38 @@ data class AetherCliSettings(
     val enableGreaseSigalgs: Boolean = false,
     val enableEchGrease: Boolean = false,
     val tlsVerify: Boolean = false,
+    val exitLoc: String = "",                    // exit country filter, e.g. "!IR,AZ,RU" or "DE,SE"
 )
 
 object AetherCliConfig {
 
-    val PROTOCOLS = listOf("wireguard", "masque", "gool", "mim")
+    val PROTOCOLS = listOf("wireguard", "wg", "masque", "wom", "wg-over-masque", "gool", "mim")
 
     fun buildArgs(s: AetherCliSettings): List<String> {
-        val protocol = s.protocol.trim().lowercase()
-        require(protocol in PROTOCOLS) { "unsupported protocol: $protocol" }
+        val protoRaw = s.protocol.trim().lowercase()
+        require(protoRaw in PROTOCOLS) { "unsupported protocol: $protoRaw" }
         require(s.socksPort in 1024..65535) { "SOCKS port out of range" }
 
-        val args = mutableListOf(
-            "--config", s.identityFile,
+        val args = mutableListOf<String>()
+
+        if (s.identityFile.isNotBlank()) {
+            args += listOf("--config", s.identityFile)
+        }
+
+        val effectiveProto = when (protoRaw) {
+            "wom", "wg-over-masque" -> "gool"
+            else -> protoRaw
+        }
+
+        args += listOf(
             "--bind", "127.0.0.1:${s.socksPort}",
-            "--protocol", protocol,
+            "--protocol", effectiveProto,
             "--log-level", "info",
         )
+
+        if (protoRaw == "gool" || protoRaw == "warp-in-warp" || protoRaw == "wiw") {
+            args += "--gool-classic"
+        }
 
         fun add(flag: String, value: String) {
             val v = value.trim()
@@ -62,7 +72,43 @@ object AetherCliConfig {
         }
 
         add("--upstream", s.upstream)
-        add("--peer", s.peer)
+
+        // Endpoint selection vs Auto Scan
+        val peerStr = s.peer.trim()
+        if (peerStr.isNotEmpty()) {
+            when (protoRaw) {
+                "gool", "warp-in-warp", "wiw" -> {
+                    if (peerStr.contains(",")) {
+                        val outer = peerStr.substringBefore(",").trim()
+                        val inner = peerStr.substringAfter(",").trim()
+                        if (outer.isNotEmpty()) add("--wiw-outer", outer)
+                        if (inner.isNotEmpty()) add("--wiw-inner", inner)
+                    } else {
+                        add("--peer", peerStr)
+                    }
+                }
+                "mim", "masque-in-masque" -> {
+                    if (peerStr.contains(",")) {
+                        val outer = peerStr.substringBefore(",").trim()
+                        val inner = peerStr.substringAfter(",").trim()
+                        if (outer.isNotEmpty()) add("--mim-outer", outer)
+                        if (inner.isNotEmpty()) add("--mim-inner", inner)
+                    } else {
+                        add("--peer", peerStr)
+                    }
+                }
+                else -> {
+                    add("--peer", peerStr)
+                }
+            }
+        } else if (s.scanMode.isNotBlank()) {
+            add("--scan", s.scanMode)
+            if (s.quickReconnect) {
+                args += "--quick-reconnect"
+            }
+        }
+
+        add("--exit-loc", s.exitLoc)
         add("--api-address", s.apiAddress)
         add("--api-host", s.apiHost)
         add("--api-sni", s.apiSni)
@@ -89,12 +135,15 @@ object AetherCliConfig {
         return args
     }
 
-    // ── JSON persistence (the UI round-trips settings through one blob) ──
+    // ── JSON persistence ──
 
     fun toJson(s: AetherCliSettings): String = org.json.JSONObject().apply {
         put("protocol", s.protocol)
         put("upstream", s.upstream)
         put("peer", s.peer)
+        put("scanMode", s.scanMode)
+        put("quickReconnect", s.quickReconnect)
+        put("exitLoc", s.exitLoc)
         put("apiAddress", s.apiAddress)
         put("apiHost", s.apiHost)
         put("apiSni", s.apiSni)
@@ -114,14 +163,19 @@ object AetherCliConfig {
         put("tlsVerify", s.tlsVerify)
     }.toString()
 
-    fun fromJson(json: String, identityFile: String, socksPort: Int): AetherCliSettings {
-        val o = runCatching { org.json.JSONObject(json) }.getOrElse { return AetherCliSettings(identityFile = identityFile, socksPort = socksPort) }
+    fun fromJson(json: String, identityFile: String = "", socksPort: Int = 10822): AetherCliSettings {
+        val o = runCatching { org.json.JSONObject(json) }.getOrElse {
+            return AetherCliSettings(identityFile = identityFile, socksPort = socksPort)
+        }
         return AetherCliSettings(
             protocol = o.optString("protocol", "wireguard").ifBlank { "wireguard" },
             socksPort = socksPort,
             identityFile = identityFile,
             upstream = o.optString("upstream"),
             peer = o.optString("peer"),
+            scanMode = o.optString("scanMode"),
+            quickReconnect = o.optBoolean("quickReconnect", false),
+            exitLoc = o.optString("exitLoc"),
             apiAddress = o.optString("apiAddress"),
             apiHost = o.optString("apiHost"),
             apiSni = o.optString("apiSni"),
