@@ -89,13 +89,33 @@ object AetherCliProcessManager {
         synchronized(recentOutput) { recentOutput.clear() }
         lastSelectedEndpoint = ""
 
-        val builder = ProcessBuilder(listOf(bin.absolutePath) + args)
+        val effectiveArgs = if (args.none { it == "-4" || it == "-6" || it == "--ip" }) {
+            args + "-4"
+        } else {
+            args
+        }
+
+        val builder = ProcessBuilder(listOf(bin.absolutePath) + effectiveArgs)
         builder.directory(context.filesDir)
         builder.redirectErrorStream(true)
-        builder.environment()["HOME"] = context.filesDir.absolutePath
+        builder.environment().apply {
+            put("HOME", context.filesDir.absolutePath)
+            put("TMPDIR", context.cacheDir.absolutePath)
+            put("AETHER_CONFIG", File(context.filesDir, "aether.toml").absolutePath)
+            put("AETHER_MASQUE_CONFIG", File(context.filesDir, "aether-masque.toml").absolutePath)
+            put("AETHER_WG_CONFIG", File(context.filesDir, "aether.toml").absolutePath)
+            val certDirs = listOf("/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts")
+                .filter { File(it).isDirectory }
+            if (certDirs.isNotEmpty()) {
+                put("SSL_CERT_DIR", certDirs.joinToString(":"))
+            }
+        }
 
         val proc = try {
-            builder.start()
+            builder.start().apply {
+                // Immediately close stdin so CLI process NEVER blocks on interactive prompt
+                runCatching { outputStream.close() }
+            }
         } catch (e: Exception) {
             lastError = "Could not start Aether v2.4: ${e.message}"
             Log.e(TAG, lastError, e)

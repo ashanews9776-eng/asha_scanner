@@ -1491,9 +1491,10 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             configStore.addAutoAetherProfiles()
             refreshWarpKeys()
-            // Auto-provision missing keys in background
-            com.ahoura.asha_scanner_ip.core.aether.AetherKeyManager.ensureKeysFor(getApplication(), "all")
-            refreshWarpKeys()
+            // If any WARP key is missing, auto-provision in background
+            if (_warpKeysStatus.value.any { !it.isPresent }) {
+                renewAllWarpKeys()
+            }
         }
     }
 }

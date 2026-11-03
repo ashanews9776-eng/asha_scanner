@@ -19,12 +19,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -158,35 +163,44 @@ fun ConfigManagerBottomSheet(
                 Box(
                     Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(5.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .background(Accent.copy(alpha = 0.12f))
-                        .border(0.5.dp, AccentBorder, RoundedCornerShape(5.dp))
+                        .border(0.5.dp, AccentBorder, RoundedCornerShape(6.dp))
                         .clickable {
                             vm.autoGenerateAetherConfigs()
                             autoAddedNotification = true
                         }
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                        .padding(horizontal = 10.dp, vertical = 9.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        s.aetherAutoConfigs,
-                        color = Accent,
-                        fontFamily = if (fa) Vazirmatn else ShareTechMono,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.Bolt,
+                            null,
+                            tint = Accent,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Spacer(Modifier.size(4.dp))
+                        Text(
+                            s.aetherAutoConfigs,
+                            color = Accent,
+                            fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                        )
+                    }
                 }
 
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(5.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .background(if (showKeysCard) AccentMuted else BlueC.copy(alpha = 0.12f))
-                        .border(0.5.dp, if (showKeysCard) AccentBorder else BlueC.copy(alpha = 0.4f), RoundedCornerShape(5.dp))
+                        .border(0.5.dp, if (showKeysCard) AccentBorder else BlueC.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
                         .clickable {
                             showKeysCard = !showKeysCard
                             if (showKeysCard) vm.refreshWarpKeys()
                         }
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                        .padding(horizontal = 10.dp, vertical = 9.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -198,11 +212,18 @@ fun ConfigManagerBottomSheet(
                         )
                         Spacer(Modifier.size(4.dp))
                         Text(
-                            if (fa) "کلیدهای WARP" else "WARP KEYS",
+                            if (fa) "کلیدها" else "Keys",
                             color = if (showKeysCard) Accent else BlueC,
-                            fontFamily = ShareTechMono,
+                            fontFamily = if (fa) Vazirmatn else ShareTechMono,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 10.5.sp,
+                            fontSize = 11.sp,
+                        )
+                        Spacer(Modifier.size(2.dp))
+                        Icon(
+                            if (showKeysCard) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            null,
+                            tint = if (showKeysCard) Accent else BlueC,
+                            modifier = Modifier.size(15.dp),
                         )
                     }
                 }
@@ -222,52 +243,83 @@ fun ConfigManagerBottomSheet(
             if (showKeysCard) {
                 Spacer(Modifier.size(8.dp))
                 CyberCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Column {
+                            Column(Modifier.weight(1f)) {
                                 Text(
                                     s.aetherKeysTitle,
                                     color = Accent,
-                                    fontFamily = ShareTechMono,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                )
-                                Text(
-                                    s.aetherKeysDesc,
-                                    color = TextMutedC,
                                     fontFamily = if (fa) Vazirmatn else ShareTechMono,
-                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.5.sp,
+                                )
+                                val activeCount = warpKeys.count { it.isPresent }
+                                Text(
+                                    if (fa) "$activeCount از ۵ هویت اختصاصی فعال است" else "$activeCount of 5 identities active",
+                                    color = if (activeCount > 0) AccentDim else TextMutedC,
+                                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                    fontSize = 9.5.sp,
                                 )
                             }
+
+                            Spacer(Modifier.size(8.dp))
+
                             Box(
                                 Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(if (isRenewingKeys) SurfaceC else AccentMuted)
-                                    .border(0.5.dp, if (isRenewingKeys) BorderC else AccentBorder, RoundedCornerShape(4.dp))
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .background(if (isRenewingKeys) SurfaceC else Accent.copy(alpha = 0.15f))
+                                    .border(0.5.dp, if (isRenewingKeys) BorderC else AccentBorder, RoundedCornerShape(5.dp))
                                     .clickable(enabled = !isRenewingKeys) { vm.renewAllWarpKeys() }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    .padding(horizontal = 9.dp, vertical = 6.dp),
                             ) {
-                                Text(
-                                    if (isRenewingKeys) "…" else s.aetherRenewKeys,
-                                    color = if (isRenewingKeys) TextMutedC else Accent,
-                                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (isRenewingKeys) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(11.dp),
+                                            color = Accent,
+                                            strokeWidth = 1.5.dp,
+                                        )
+                                        Spacer(Modifier.size(5.dp))
+                                    } else {
+                                        Icon(
+                                            Icons.Filled.Refresh,
+                                            null,
+                                            tint = Accent,
+                                            modifier = Modifier.size(12.dp),
+                                        )
+                                        Spacer(Modifier.size(3.dp))
+                                    }
+                                    Text(
+                                        if (isRenewingKeys) (if (fa) "در حال استعلام…" else "Renewing…") else s.aetherRenewKeys,
+                                        color = if (isRenewingKeys) TextMutedC else Accent,
+                                        fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
                             }
                         }
 
                         if (renewalMessage.isNotBlank()) {
-                            Text(
-                                renewalMessage,
-                                color = if (isRenewingKeys) BlueC else Accent,
-                                fontFamily = if (fa) Vazirmatn else ShareTechMono,
-                                fontSize = 9.5.sp,
-                            )
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (renewalMessage.contains("خطا") || renewalMessage.contains("failed") || renewalMessage.contains("Refused")) RedC.copy(alpha = 0.15f) else BlueC.copy(alpha = 0.12f))
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    renewalMessage,
+                                    color = if (renewalMessage.contains("خطا") || renewalMessage.contains("failed") || renewalMessage.contains("Refused")) Color(0xFFFF8A80) else BlueC,
+                                    fontFamily = if (fa) Vazirmatn else ShareTechMono,
+                                    fontSize = 9.5.sp,
+                                )
+                            }
                         }
 
                         warpKeys.forEach { key ->
@@ -277,7 +329,7 @@ fun ConfigManagerBottomSheet(
                                     .clip(RoundedCornerShape(4.dp))
                                     .background(SurfaceC.copy(alpha = 0.5f))
                                     .border(0.5.dp, BorderC, RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
@@ -286,25 +338,25 @@ fun ConfigManagerBottomSheet(
                                         Modifier
                                             .size(7.dp)
                                             .clip(CircleShape)
-                                            .background(if (key.isPresent) Accent else Color(0xFFFF5F6D))
+                                            .background(if (key.isPresent) Accent else Color(0xFFFFB300))
                                     )
                                     Spacer(Modifier.size(6.dp))
                                     Text(
                                         key.type,
                                         color = TextPrimaryC,
-                                        fontFamily = ShareTechMono,
+                                        fontFamily = if (fa) Vazirmatn else ShareTechMono,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
                                     )
                                 }
                                 Text(
                                     if (key.isPresent) {
-                                        if (key.ipv4.isNotBlank()) key.ipv4 else key.deviceId.take(8) + "…"
+                                        if (key.ipv4.isNotBlank()) "${key.ipv4} ✓" else (key.deviceId.take(8) + "… ✓")
                                     } else {
                                         s.aetherKeyMissing
                                     },
-                                    color = if (key.isPresent) TextSecondaryC else Color(0xFFFF5F6D),
-                                    fontFamily = ShareTechMono,
+                                    color = if (key.isPresent) Accent else Color(0xFFFFB300),
+                                    fontFamily = if (fa && !key.isPresent) Vazirmatn else ShareTechMono,
                                     fontSize = 9.sp,
                                 )
                             }

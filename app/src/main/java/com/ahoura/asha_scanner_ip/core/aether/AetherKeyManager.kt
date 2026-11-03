@@ -202,20 +202,26 @@ object AetherKeyManager {
         val args = mutableListOf(
             bin.absolutePath,
             "--register", kind,
-            "--api-address", "api.devices.cloudflare.com",
-            "--api-sni", "api.devices.cloudflare.com",
-            "--api-host", "api.devices.cloudflare.com",
             "--fragment",
             "--fragment-size", "10-30",
             "--fragment-delay", "10-50",
             "--tls-ciphers", "ALL:!aPSK:!ECDSA+SHA1:!3DES",
             "--tls-groups", "X25519MLKEM768:X25519:P-256:P-384",
             "--tls-sigalgs", "ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256:rsa_pkcs1_sha256:ecdsa_secp384r1_sha384:rsa_pss_rsae_sha384:rsa_pkcs1_sha384:rsa_pss_rsae_sha512:rsa_pkcs1_sha512",
-            "--ech", "auto",
-            "--ech-dns", "1.1.1.1",
-            "--ech-domain", "cloudflare-ech.com",
             "--log-level", "info",
         )
+
+        // Check if user has a scanned clean Cloudflare IP to bypass potential DNS poisoning
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val storedClean = prefs.getString("clean_ip", null)?.trim().orEmpty()
+        if (storedClean.isNotBlank()) {
+            val ipOnly = storedClean.substringBefore(":")
+            args.addAll(listOf(
+                "--api-address", ipOnly,
+                "--api-sni", "api.devices.cloudflare.com",
+                "--api-host", "api.devices.cloudflare.com",
+            ))
+        }
 
         Log.i(TAG, "Starting key registration: ${args.joinToString(" ")}")
         ConnectionLog.record("$TAG: Starting registration for '$kind'")
@@ -223,7 +229,18 @@ object AetherKeyManager {
         val builder = ProcessBuilder(args)
         builder.directory(context.filesDir)
         builder.redirectErrorStream(true)
-        builder.environment()["HOME"] = context.filesDir.absolutePath
+        builder.environment().apply {
+            put("HOME", context.filesDir.absolutePath)
+            put("TMPDIR", context.cacheDir.absolutePath)
+            put("AETHER_CONFIG", File(context.filesDir, FILE_WG_PRIMARY).absolutePath)
+            put("AETHER_MASQUE_CONFIG", File(context.filesDir, FILE_MASQUE_PRIMARY).absolutePath)
+            put("AETHER_WG_CONFIG", File(context.filesDir, FILE_WG_PRIMARY).absolutePath)
+            val certDirs = listOf("/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts")
+                .filter { File(it).isDirectory }
+            if (certDirs.isNotEmpty()) {
+                put("SSL_CERT_DIR", certDirs.joinToString(":"))
+            }
+        }
 
         val proc = try {
             builder.start()
@@ -234,6 +251,7 @@ object AetherKeyManager {
         }
 
         var successSeen = false
+        var lastErr = ""
         val readerThread = Thread({
             try {
                 BufferedReader(InputStreamReader(proc.inputStream)).forEachLine { line ->
@@ -242,6 +260,9 @@ object AetherKeyManager {
                         ConnectionLog.record("$TAG $line")
                         if (line.contains("identities ready") || line.contains("identity ready")) {
                             successSeen = true
+                        }
+                        if (line.contains("Error") || line.contains("error:") || line.contains("failed") || line.contains("Refused")) {
+                            lastErr = line
                         }
                         // Send user-friendly progress updates
                         when {
@@ -261,10 +282,10 @@ object AetherKeyManager {
             start()
         }
 
-        val completed = proc.waitFor(45, TimeUnit.SECONDS)
+        val completed = proc.waitFor(120, TimeUnit.SECONDS)
         if (!completed) {
             proc.destroyForcibly()
-            Log.w(TAG, "Registration process timed out after 45s")
+            Log.w(TAG, "Registration process timed out after 120s")
             onProgress("زمان استعلام کلید به پایان رسید")
             return false
         }
@@ -274,11 +295,22 @@ object AetherKeyManager {
         val exitCode = proc.exitValue()
         Log.i(TAG, "Aether registration finished with exitCode=$exitCode, successSeen=$successSeen")
 
-        return if (exitCode == 0 || successSeen) {
+        val filesOk = if (kind == "all") {
+            getAllKeysStatus(context).count { it.isPresent } >= 2
+        } else {
+            hasKeysFor(context, kind)
+        }
+
+        return if (exitCode == 0 || successSeen || filesOk) {
             onProgress("کلیدها با موفقیت تولید و تأیید شدند ✓")
             true
         } else {
-            onProgress("ثبت کلید ناموفق بود (کد خروج: $exitCode)")
+            val friendlyErr = if (lastErr.isNotBlank()) {
+                "خطا در ثبت کلید: ${lastErr.take(65)}"
+            } else {
+                "عدم دسترسی به سرور کلودفلر (کد: $exitCode)"
+            }
+            onProgress(friendlyErr)
             false
         }
     }

@@ -567,8 +567,19 @@ class AshaVpnService : GuardVpnService() {
         customTimerJob = customScope.launch {
             while (isActive && isCustomActive) {
                 delay(1000)
-                if (!XrayProcessManager.isRunning || !Tun2SocksManager.isRunning) {
-                    val err = XrayProcessManager.lastError.ifBlank { "VPN engine process exited unexpectedly" }
+                val engineRunning = if (com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.isRunning) {
+                    true
+                } else {
+                    XrayProcessManager.isRunning
+                }
+                if (!engineRunning || !Tun2SocksManager.isRunning) {
+                    val err = if (com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.isRunning) {
+                        XrayProcessManager.lastError.ifBlank { "VPN engine process exited unexpectedly" }
+                    } else if (com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.lastError.isNotBlank()) {
+                        com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.lastError
+                    } else {
+                        XrayProcessManager.lastError.ifBlank { "VPN engine process exited unexpectedly" }
+                    }
                     sendStatus(STATUS_FAILED, err)
                     VpnManager.updateStats {
                         it.copy(status = VpnStatus.ERROR, errorMessage = err)
@@ -664,14 +675,22 @@ class AshaVpnService : GuardVpnService() {
      * clobber each other.
      */
     private fun startAetherCliVpn(profileName: String) {
+        com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore.reset()
+        com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore.update(
+            com.ahoura.asha_scanner_ip.core.guard.ConnectionPhase.STARTING,
+            progressPercent = 10,
+            detail = "راه‌اندازی موتور Aether v2.4…",
+            outerLabel = "Aether",
+        )
+
         VpnManager.updateStats {
             it.copy(
                 status = VpnStatus.CONNECTING,
                 transport = "aether24",
                 activeProfile = null,
                 errorMessage = null,
-                detailMessage = "Starting Aether v2.4…",
-                progress = -1,
+                detailMessage = "بررسی کلیدهای امن کلودفلر…",
+                progress = 10,
             )
         }
 
@@ -684,16 +703,31 @@ class AshaVpnService : GuardVpnService() {
                     socksPort = com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.SOCKS_PORT,
                 )
 
-                sendStatus(STATUS_CONNECTING, "Checking Cloudflare WARP credentials…")
+                val protoLabel = cliSettings.protocol.uppercase()
+
+                com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore.update(
+                    com.ahoura.asha_scanner_ip.core.guard.ConnectionPhase.STARTING,
+                    progressPercent = 25,
+                    detail = "بررسی و اعتبارسنجی کلیدهای کلودفلر ($protoLabel)…",
+                    outerLabel = protoLabel,
+                )
+
+                sendStatus(STATUS_CONNECTING, "بررسی هویت رمزنگاری کلودفلر…")
                 val keysReady = com.ahoura.asha_scanner_ip.core.aether.AetherKeyManager.ensureKeysFor(
                     applicationContext,
                     cliSettings.protocol,
                 ) { msg ->
                     sendStatus(STATUS_CONNECTING, msg)
                     VpnManager.updateStats { s -> s.copy(detailMessage = msg) }
+                    com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore.update(
+                        com.ahoura.asha_scanner_ip.core.guard.ConnectionPhase.STARTING,
+                        progressPercent = 40,
+                        detail = msg,
+                        outerLabel = protoLabel,
+                    )
                 }
                 if (!keysReady) {
-                    throw IllegalStateException("Failed to provision Cloudflare WARP keys")
+                    throw IllegalStateException("خطا در ایجاد یا تایید کلیدهای کلودفلر")
                 }
 
                 // If no manual peer is set, inspect stored clean IP candidate
@@ -705,23 +739,53 @@ class AshaVpnService : GuardVpnService() {
                     if (storedClean.isNotBlank() && CoreConfig.isWarpEndpoint(storedClean)) storedClean else ""
                 }
 
-                val finalSettings = cliSettings.copy(peer = cleanCandidate)
+                val finalSettings = cliSettings.copy(
+                    peer = cleanCandidate,
+                    scanMode = if (cleanCandidate.isBlank()) "balanced" else "",
+                    quickReconnect = true,
+                )
                 val args = com.ahoura.asha_scanner_ip.core.aether.AetherCliConfig.buildArgs(finalSettings)
+
+                com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore.update(
+                    com.ahoura.asha_scanner_ip.core.guard.ConnectionPhase.OUTER,
+                    progressPercent = 55,
+                    detail = if (cleanCandidate.isNotBlank()) "اتصال به IP تمیز: $cleanCandidate" else "اسکن خودکار درگاه‌های کلودفلر…",
+                    outerLabel = protoLabel,
+                )
 
                 val started = com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.start(
                     applicationContext, args,
                     com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.SOCKS_PORT,
                 ) { line ->
-                    if (line.contains("selected") || line.contains("ready") || line.contains("connected")) {
-                        VpnManager.updateStats { s -> s.copy(detailMessage = line) }
+                    val userMsg = when {
+                        line.contains("selected") || line.contains("candidate ok") -> "درگاه مناسب کلودفلر انتخاب شد"
+                        line.contains("connecting") || line.contains("probing") -> "آزمایش مسیرهای پرسرعت کلودفلر…"
+                        line.contains("ready") || line.contains("connected") -> "تانل امن برقرار شد ✓"
+                        else -> null
+                    }
+                    if (userMsg != null) {
+                        VpnManager.updateStats { s -> s.copy(detailMessage = userMsg) }
+                        com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore.update(
+                            com.ahoura.asha_scanner_ip.core.guard.ConnectionPhase.INNER,
+                            progressPercent = 70,
+                            detail = userMsg,
+                            outerLabel = protoLabel,
+                        )
                     }
                 }
                 if (!started) {
                     throw IllegalStateException(
                         com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.lastError
-                            .ifBlank { "Aether v2.4 failed to start" }
+                            .ifBlank { "موتور Aether اجرا نشد" }
                     )
                 }
+
+                com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore.update(
+                    com.ahoura.asha_scanner_ip.core.guard.ConnectionPhase.BRIDGING,
+                    progressPercent = 85,
+                    detail = "هدایت ترافیک دستگاه به تانل (tun2socks)…",
+                    outerLabel = protoLabel,
+                )
 
                 val dnsIp = runCatching { settings.vpnDnsIp.first().trim() }.getOrDefault("1.1.1.1")
                     .let { raw -> if (raw.matches(Regex("[0-9.]+")) || raw.matches(Regex("[0-9a-fA-F:]+"))) raw else "1.1.1.1" }
@@ -741,12 +805,8 @@ class AshaVpnService : GuardVpnService() {
                 customVpnInterface = pfd
 
                 val bridged = Tun2SocksManager.start(pfd, com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.SOCKS_PORT)
-                if (!bridged) throw IllegalStateException("Failed to bridge TUN to SOCKS5 via tun2socks")
+                if (!bridged) throw IllegalStateException("خطا در اتصال رابط شبکه به پورت محلی SOCKS5")
 
-                // A stop that raced the establish must win: without this check
-                // the coroutine would re-arm tun2socks AFTER stopCustomVpn()
-                // tore it down, leaving a live tunnel behind a "disconnected"
-                // UI until force stop.
                 if (!isCustomActive) {
                     runCatching { pfd.close() }
                     customVpnInterface = null
@@ -754,13 +814,59 @@ class AshaVpnService : GuardVpnService() {
                 }
                 isCustomActive = true
                 customConnectedStartMs = System.currentTimeMillis()
-                VpnManager.updateStats { it.copy(status = VpnStatus.CONNECTED, connectedDurationSeconds = 0L, errorMessage = null) }
-                startCustomTimer()
-            } catch (e: Exception) {
+
+                com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore.update(
+                    com.ahoura.asha_scanner_ip.core.guard.ConnectionPhase.CONNECTED,
+                    progressPercent = 100,
+                    detail = "متصل شد (تانل رمزگذاری‌شده فعال است) ✓",
+                    outerLabel = protoLabel,
+                )
+
                 VpnManager.updateStats {
-                    it.copy(status = VpnStatus.ERROR, errorMessage = e.message ?: "Aether v2.4 connection failed")
+                    it.copy(
+                        status = VpnStatus.CONNECTED,
+                        connectedDurationSeconds = 0L,
+                        errorMessage = null,
+                        detailMessage = "متصل شد ✓",
+                    )
                 }
+                startCustomTimer()
+                startAetherPing()
+            } catch (e: Exception) {
+                val err = e.message ?: "اتصال به Aether برقرار نشد"
+                sendStatus(STATUS_FAILED, err)
+                VpnManager.updateStats {
+                    it.copy(status = VpnStatus.ERROR, errorMessage = err, detailMessage = err)
+                }
+                com.ahoura.asha_scanner_ip.core.guard.ConnectionStepsStore.update(
+                    com.ahoura.asha_scanner_ip.core.guard.ConnectionPhase.FAILED,
+                    progressPercent = 0,
+                    detail = err,
+                    outerLabel = "Error",
+                )
                 stopCustomVpn()
+            }
+        }
+    }
+
+    private fun startAetherPing() {
+        customPingJob?.cancel()
+        customPingJob = customScope.launch {
+            while (isActive && isCustomActive) {
+                if (!isScreenInteractive()) {
+                    delay(30_000)
+                    continue
+                }
+                val ep = com.ahoura.asha_scanner_ip.core.aether.AetherCliProcessManager.lastSelectedEndpoint
+                val target = if (ep.isNotBlank()) ep.substringBefore(":") else "1.1.1.1"
+                val port = if (ep.contains(":")) ep.substringAfter(":").toIntOrNull() ?: 443 else 443
+                val ping = VpnManager.measurePingDirect(target, port, "www.cloudflare.com")
+                VpnManager.updateStats {
+                    if (it.status == VpnStatus.CONNECTED) {
+                        it.copy(pingMs = ping)
+                    } else it
+                }
+                delay(12_000)
             }
         }
     }
