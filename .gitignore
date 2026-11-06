@@ -12,3 +12,4 @@ build/
 .zcodeignore
 .kotlin/
 asha-linux
+linux/bin/asha-scanner
