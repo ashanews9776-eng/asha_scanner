@@ -36,7 +36,11 @@ jobs:
           ENCODED_STRING: ${{ secrets.SIGNING_KEY }}
         run: |
           if [ -n "$ENCODED_STRING" ]; then
-            echo "$ENCODED_STRING" | base64 --decode > app/release-key-ci.jks
+            echo "$ENCODED_STRING" | sed 's/^\xef\xbb\xbf//' | tr -d '\r\n ' | base64 --decode > app/release-key-ci.jks 2>/dev/null || true
+            if [ ! -s app/release-key-ci.jks ] || [ $(wc -c < app/release-key-ci.jks) -lt 500 ]; then
+              echo "Keystore decode failed or produced invalid file, removing to allow unsigned release"
+              rm -f app/release-key-ci.jks
+            fi
           fi
 
       - name: Grant execute permission for gradlew

@@ -13,8 +13,8 @@ android {
         applicationId = "com.ahoura.asha_scanner_ip"
         minSdk = 26
         targetSdk = 37
-        versionCode = 21
-        versionName = "0.8.10"
+        versionCode = 20
+        versionName = "0.8.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -47,7 +47,7 @@ android {
             val kPassword = System.getenv("KEY_PASSWORD") ?: properties.getProperty("key.password")
 
             val keyFile = file(keystorePath).let { if (it.exists()) it else rootProject.file(keystorePath) }
-            if (keyFile.exists() && keystorePassword != null && alias != null && kPassword != null) {
+            if (keyFile.exists() && keyFile.length() > 500 && keystorePassword != null && alias != null && kPassword != null) {
                 storeFile = keyFile
                 storePassword = keystorePassword
                 keyAlias = alias
