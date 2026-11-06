@@ -82,6 +82,10 @@ object Tun2SocksManager {
     private var lastThread: Thread? = null
 
     @Volatile
+    var lastError: String = ""
+        private set
+
+    @Volatile
     var privateAddress: PrivateAddress = defaultPrivateAddress()
         private set
 
@@ -153,43 +157,35 @@ object Tun2SocksManager {
         dnsOnlyUdpgw: Boolean = false,
         mtu: Int = VPN_INTERFACE_MTU,
     ): Boolean {
+        lastError = ""
         if (tun2SocksThread != null) {
             ConnectionLog.record("tun2socks already running")
             return true
         }
-        // Refuse to start while a previous native run() is still unwinding.
-        //
-        // This is the fix for the abort() crash seen when connect/disconnect is
-        // tapped repeatedly. tun2socks.c keeps its lwIP state in file-scope
-        // globals (netif_ipaddr, have_netif, listener, listener_ip6, quitting,
-        // the BReactor `ss`), so two concurrent run() calls share one set of
-        // globals. The second one reaches lwip_init_job_hadler(), hits
-        // ASSERT(!have_netif) — still 1 from the first run — and asserts are
-        // live in a debug build, so ASSERT calls abort(). That is exactly the
-        // reported stack: abort() <- 3 frames of libtun2socks.so <- the
-        // Tun2SocksManager.start$lambda$0 thread.
-        //
-        // stop() previously used thread.join(3000) and cleared the handle
-        // regardless of whether the thread actually died, so a fast re-tap
-        // could enter start() while run() was still live.
         val previous = lastThread
         if (previous != null && previous.isAlive) {
             try {
-                previous.join(NATIVE_EXIT_GRACE_MS)
+                previous.join(2500L)
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
             if (previous.isAlive) {
-                // Starting now would abort the process. Refusing is recoverable:
-                // the caller reports a failed connect and the user can retry.
-                ConnectionLog.record(
-                    "tun2socks: previous native instance still shutting down; refusing to start a second one"
-                )
-                return false
+                runCatching { previous.interrupt() }
+                try {
+                    previous.join(1000L)
+                } catch (_: InterruptedException) {}
+                if (previous.isAlive) {
+                    lastError = "Previous tun2socks instance is still shutting down (please retry in 2 seconds)"
+                    ConnectionLog.record(
+                        "tun2socks: previous native instance still shutting down; refusing to start a second one"
+                    )
+                    return false
+                }
             }
         }
         lastThread = null
         if (socksProxyPort <= 0) {
+            lastError = "Invalid SOCKS5 port ($socksProxyPort)"
             ConnectionLog.record("tun2socks: invalid SOCKS port $socksProxyPort")
             return false
         }
@@ -201,6 +197,7 @@ object Tun2SocksManager {
         val duplicated = try {
             tunFd.dup()
         } catch (e: IOException) {
+            lastError = "Failed to duplicate TUN file descriptor: ${e.message}"
             ConnectionLog.record("tun2socks: could not dup tun fd: ${e.message}")
             return false
         }
@@ -211,11 +208,11 @@ object Tun2SocksManager {
                 "logTun2Socks",
             )
         } catch (e: Throwable) {
-            // Logger wiring is diagnostic only — never block the tunnel on it.
             ConnectionLog.record("tun2socks: logger init failed: ${e.message}")
         }
 
         if (!Tun2SocksJniLoader.isLoaded) {
+            lastError = "libtun2socks.so is not available on this device"
             ConnectionLog.record("tun2socks: libtun2socks.so is not loaded on this device")
             return false
         }
@@ -234,9 +231,11 @@ object Tun2SocksManager {
                     if (dnsOnlyUdpgw) 1 else 0,
                 )
             } catch (e: Throwable) {
+                lastError = e.message.orEmpty()
                 ConnectionLog.record("tun2socks crashed: ${e.message}")
             } finally {
                 ConnectionLog.record("tun2socks exited")
+                tun2SocksThread = null
             }
         }, "tun2socks")
         thread.start()

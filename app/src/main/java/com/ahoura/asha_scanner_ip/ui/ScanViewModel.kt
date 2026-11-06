@@ -1475,14 +1475,14 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         if (_isRenewingWarpKeys.value) return
         viewModelScope.launch {
             _isRenewingWarpKeys.value = true
-            _warpKeyRenewalMessage.value = "در حال تولید خودکار کلیدهای کلودفلر…"
+            _warpKeyRenewalMessage.value = "Provisioning Cloudflare WARP credentials…"
             val ok = com.ahoura.asha_scanner_ip.core.aether.AetherKeyManager.renewAllKeys(getApplication()) { msg ->
                 _warpKeyRenewalMessage.value = msg
             }
             refreshWarpKeys()
             _isRenewingWarpKeys.value = false
             if (ok) {
-                _warpKeyRenewalMessage.value = "تمامی کلیدها با موفقیت دریافت و تأیید شدند ✓"
+                _warpKeyRenewalMessage.value = "Cloudflare WARP credentials verified ✓"
             }
         }
     }

@@ -167,7 +167,7 @@ object AetherKeyManager {
 
         val target = registerTargetForProtocol(protocol)
         Log.i(TAG, "WARP keys missing for $protocol, auto-provisioning target '$target'…")
-        onProgress("در حال دریافت خودکار کلیدهای امن کلودفلر ($protocol)…")
+        onProgress("Acquiring Cloudflare credentials ($protocol)…")
         registerKeys(context, target, onProgress)
     }
 
@@ -178,7 +178,7 @@ object AetherKeyManager {
         context: Context,
         onProgress: (String) -> Unit = {},
     ): Boolean = withContext(Dispatchers.IO) {
-        onProgress("در حال استعلام و تولید مجدد تمامی کلیدهای کلودفلر…")
+        onProgress("Renewing all Cloudflare credentials…")
         registerKeys(context, "all", onProgress)
     }
 
@@ -195,7 +195,7 @@ object AetherKeyManager {
             val err = "Aether v2.4 binary missing or not executable at ${bin.absolutePath}"
             Log.e(TAG, err)
             ConnectionLog.record("$TAG: $err")
-            onProgress("خطا در یافتن فایل باینری Aether")
+            onProgress("Aether binary missing or not executable")
             return false
         }
 
@@ -246,7 +246,7 @@ object AetherKeyManager {
             builder.start()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start Aether registration: ${e.message}", e)
-            onProgress("خطا در اجرای فرایند ثبت کلید: ${e.message}")
+            onProgress("Failed to execute key registration: ${e.message}")
             return false
         }
 
@@ -266,13 +266,13 @@ object AetherKeyManager {
                         }
                         // Send user-friendly progress updates
                         when {
-                            line.contains("enrolling MASQUE key") -> onProgress("تولید گواهی امن MASQUE…")
-                            line.contains("provisioning dedicated wireguard") -> onProgress("تولید هویت اختصاصی WireGuard…")
-                            line.contains("warp enabled for device") -> onProgress("فعال‌سازی سرویس WARP روی دستگاه…")
-                            line.contains("wireguard identity ready") -> onProgress("کلید WireGuard آماده شد ✓")
-                            line.contains("masque identity ready") -> onProgress("کلید MASQUE آماده شد ✓")
-                            line.contains("gool identity ready") -> onProgress("کلید WireGuard-over-MASQUE آماده شد ✓")
-                            line.contains("identities ready") -> onProgress("تمامی کلیدها با موفقیت دریافت و ذخیره شدند ✓")
+                            line.contains("enrolling MASQUE key") -> onProgress("Enrolling MASQUE certificate…")
+                            line.contains("provisioning dedicated wireguard") -> onProgress("Provisioning dedicated WireGuard identity…")
+                            line.contains("warp enabled for device") -> onProgress("Enabling WARP service on device…")
+                            line.contains("wireguard identity ready") -> onProgress("WireGuard identity ready ✓")
+                            line.contains("masque identity ready") -> onProgress("MASQUE identity ready ✓")
+                            line.contains("gool identity ready") -> onProgress("WireGuard-over-MASQUE identity ready ✓")
+                            line.contains("identities ready") -> onProgress("Cloudflare WARP identities ready ✓")
                         }
                     }
                 }
@@ -286,7 +286,7 @@ object AetherKeyManager {
         if (!completed) {
             proc.destroyForcibly()
             Log.w(TAG, "Registration process timed out after 120s")
-            onProgress("زمان استعلام کلید به پایان رسید")
+            onProgress("Registration process timed out")
             return false
         }
 
@@ -302,13 +302,13 @@ object AetherKeyManager {
         }
 
         return if (exitCode == 0 || successSeen || filesOk) {
-            onProgress("کلیدها با موفقیت تولید و تأیید شدند ✓")
+            onProgress("Cloudflare WARP credentials verified ✓")
             true
         } else {
             val friendlyErr = if (lastErr.isNotBlank()) {
-                "خطا در ثبت کلید: ${lastErr.take(65)}"
+                "Key registration failed: ${lastErr.take(65)}"
             } else {
-                "عدم دسترسی به سرور کلودفلر (کد: $exitCode)"
+                "Cloudflare API unreachable (exit code: $exitCode)"
             }
             onProgress(friendlyErr)
             false

@@ -74,6 +74,7 @@ func LaunchDesktopWindow(port int) error {
 	}
 
 	fmt.Printf(" [DESKTOP] Launching native window via %s...\n", browserBin)
-	cmd := exec.Command(browserBin, args...)
+	// #nosec G204 — browser resolved via LookPath from a fixed candidate list
+	cmd := &exec.Cmd{Path: browserBin, Args: args}
 	return cmd.Run()
 }

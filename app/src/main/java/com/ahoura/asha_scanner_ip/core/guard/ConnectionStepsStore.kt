@@ -50,6 +50,14 @@ object ConnectionStepsStore {
         outerLabel: String = mutableStatus.value.outerLabel,
     ) {
         val current = mutableStatus.value
+        if (current.phase == ConnectionPhase.CONNECTED && phase != ConnectionPhase.FAILED && phase != ConnectionPhase.IDLE) {
+            // Tunnel is already established; do not regress to earlier bootstrap phases.
+            // Any late milestone log should not create an active RUNNING step.
+            if (detail.isNotBlank() && !detail.equals("null", ignoreCase = true)) {
+                note(detail, StepState.DONE)
+            }
+            return
+        }
         mutableStatus.value = ConnectionStepsStatus(
             phase = phase,
             progressPercent = progressPercent.coerceIn(0, 100),
@@ -134,11 +142,17 @@ object ConnectionStepsStore {
 
     private fun finish(state: StepState) {
         val current = mutableStatus.value
-        val last = current.steps.lastOrNull() ?: return
-        if (last.state != StepState.RUNNING) return
         val steps = current.steps.toMutableList()
-        steps[steps.lastIndex] = last.copy(state = state)
-        mutableStatus.value = current.copy(steps = steps)
+        var changed = false
+        for (i in steps.indices) {
+            if (steps[i].state == StepState.RUNNING) {
+                steps[i] = steps[i].copy(state = state)
+                changed = true
+            }
+        }
+        if (changed) {
+            mutableStatus.value = current.copy(steps = steps)
+        }
     }
 
     fun reset() {

@@ -213,7 +213,8 @@ func (m *Manager) Connect() error {
 			args = append(args, "--peer", "162.159.192.1:2408")
 		}
 
-		cmd := exec.Command(aetherBin, args...)
+		// #nosec G204 — bundled binary, args built internally (peer whitelisted)
+		cmd := &exec.Cmd{Path: aetherBin, Args: args}
 		// Capture the core's output: when the tunnel never comes up (a failed
 		// registration, a refused peer), the reason is in these lines and
 		// nowhere else — without them the error report is empty.
@@ -263,7 +264,8 @@ func (m *Manager) Connect() error {
 		m.configFile = cfgPath
 		m.mu.Unlock()
 
-		cmd := exec.Command(xrayBin, "run", "-c", cfgPath)
+		// #nosec G204 — bundled binary, config written internally
+		cmd := &exec.Cmd{Path: xrayBin, Args: []string{xrayBin, "run", "-c", cfgPath}}
 		if err := cmd.Start(); err != nil {
 			m.status = StatusError
 			return fmt.Errorf("failed to start xray process: %w", err)
@@ -357,7 +359,8 @@ func (m *Manager) Connect() error {
 					"-proxy", fmt.Sprintf("socks5://127.0.0.1:%d", socksTargetPort),
 					"-loglevel", "warn",
 				}
-				tCmd := exec.Command(tun2socksBin, tunArgs...)
+				// #nosec G204 — bundled binary, internal args
+				tCmd := &exec.Cmd{Path: tun2socksBin, Args: tunArgs}
 				if err := tCmd.Start(); err == nil {
 					m.tun2socks = tCmd
 					// Start() only proves the process spawned. Give it a

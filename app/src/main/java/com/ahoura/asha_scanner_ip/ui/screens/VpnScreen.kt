@@ -2416,10 +2416,41 @@ private fun VpnPowerButtonContent(
 private fun humanizeConnectionDetail(detail: String, fa: Boolean): String {
     val lower = detail.lowercase()
     return when {
-        lower.contains("retrieving identity") || lower.contains("retrieving key") ->
-            if (fa) "در حال دریافت و تایید کلید رمزنگاری..." else "Retrieving cryptographic identity…"
-        lower.contains("scanning gateways") || lower.contains("finding clean") ->
-            if (fa) "در حال بررسی و یافتن سریع‌ترین درگاه کلودفلر..." else "Scanning for cleanest Cloudflare gateway…"
+        lower.contains("verifying cloudflare credentials") ||
+        lower.contains("checking cloudflare credentials") ||
+        lower.contains("retrieving identity") ||
+        lower.contains("retrieving key") ||
+        lower.contains("بررسی و اعتبارسنجی کلیدهای کلودفلر") ||
+        lower.contains("بررسی کلیدهای کلودفلر") ->
+            if (fa) "در حال بررسی و اعتبارسنجی کلیدهای کلودفلر…" else "Verifying Cloudflare credentials…"
+        lower.contains("candidate gateway selected") ||
+        lower.contains("gateway selected") ||
+        lower.contains("درگاه مناسب کلودفلر انتخاب شد") ||
+        lower.contains("درگاه پرسرعت کلودفلر انتخاب شد") ->
+            if (fa) "درگاه پرسرعت کلودفلر انتخاب شد ✓" else "Fast Cloudflare gateway selected ✓"
+        lower.contains("testing cloudflare routes") ||
+        lower.contains("آزمایش مسیرهای پرسرعت کلودفلر") ->
+            if (fa) "در حال آزمایش مسیرهای پرسرعت کلودفلر…" else "Testing high-speed Cloudflare routes…"
+        lower.contains("secure tunnel established") ||
+        lower.contains("tunnel established") ||
+        lower.contains("تانل امن برقرار شد") ->
+            if (fa) "تانل امن برقرار شد ✓" else "Secure tunnel established ✓"
+        lower.contains("routing device traffic") ||
+        lower.contains("tun2socks") ||
+        lower.contains("هدایت ترافیک دستگاه به تانل") ->
+            if (fa) "هدایت ترافیک دستگاه به تانل امن (tun2socks)…" else "Routing device traffic via tun2socks…"
+        lower.contains("connection established") ||
+        lower.contains("connected ✓") ||
+        lower.contains("متصل شد") ->
+            if (fa) "اتصال امن برقرار شد ✓" else "Connection established ✓"
+        lower.contains("scanning gateways") ||
+        lower.contains("scanning cloudflare gateways") ||
+        lower.contains("finding clean") ||
+        lower.contains("اسکن خودکار درگاه‌های کلودفلر") ->
+            if (fa) "در حال اسکن و یافتن سریع‌ترین درگاه کلودفلر…" else "Scanning for cleanest Cloudflare gateway…"
+        lower.contains("connecting to clean endpoint") ||
+        lower.contains("اتصال به ip تمیز") ->
+            if (fa) "در حال اتصال به سرور تمیز انتخاب‌شده…" else detail
         lower.contains("masque tunnel ended") || lower.contains("reconnecting") ->
             if (fa) "درگاه قبلی مسدود شد؛ سوئیچ هوشمند به درگاه پایدار بعدی..." else "Gateway unresponsive; switching to backup gateway…"
         lower.contains("h2 connect-ip status 400") || lower.contains("connect-ip status") ->
@@ -2445,6 +2476,22 @@ private fun humanizeConnectionDetail(detail: String, fa: Boolean): String {
 private fun humanizeConnectionError(error: String, fa: Boolean): String {
     val lower = error.lowercase()
     return when {
+        lower.contains("failed to bridge tun to socks5") ||
+        lower.contains("خطا در اتصال رابط شبکه") ->
+            if (fa) "خطا در اتصال رابط شبکه به تونل (tun2socks). لطفاً مجدداً امتحان کنید."
+            else "Failed to bridge TUN interface to internal proxy via tun2socks. Please retry."
+        lower.contains("previous tun2socks instance is still shutting down") ||
+        lower.contains("موتور قبلی tun2socks") ->
+            if (fa) "موتور قبلی شبکه هنوز در حال بسته شدن است (لطفاً ۲ ثانیه بعد مجدداً تلاش کنید)."
+            else "Previous network engine is still shutting down. Please retry in 2 seconds."
+        lower.contains("failed to provision cloudflare warp keys") ||
+        lower.contains("failed to provision") ->
+            if (fa) "عدم امکان دریافت خودکار کلیدهای کلودفلر. لطفاً وضعیت اتصال را بررسی کرده یا مجدداً تلاش کنید."
+            else "Failed to provision Cloudflare WARP credentials. Please check your network or retry."
+        lower.contains("aether engine failed to start") ||
+        lower.contains("موتور aether اجرا نشد") ->
+            if (fa) "خطا در اجرای فرایند Aether. لطفاً مجدداً اتصال را برقرار کنید."
+            else "Aether engine process failed to start. Please try connecting again."
         lower.contains("no clean endpoint") ->
             if (fa) "ارتباط با درگاه‌های کلودفلر به دلیل اختلال شدید اینترنت برقرار نشد. حالت Asha PoW را امتحان کنید یا مجدداً دکمه اتصال را بزنید."
             else "Could not reach clean Cloudflare endpoints due to network censorship. Please retry or switch to Asha PoW mode."
@@ -2485,6 +2532,64 @@ private fun mapStepToCopy(raw: String, s: AppStrings, fa: Boolean): Pair<String,
     }
 
     return when {
+        text.startsWith("Starting ") -> {
+            val proto = text.removePrefix("Starting ").trim().trimEnd('…', '.')
+            (if (fa) "راه‌اندازی تانل امن" else "Starting secure tunnel") to proto
+        }
+        text.contains("Verifying Cloudflare credentials") ||
+        text.contains("Checking Cloudflare credentials") ||
+        text.contains("بررسی و اعتبارسنجی کلیدهای کلودفلر") ||
+        text.contains("بررسی کلیدهای کلودفلر") -> {
+            val proto = if (text.contains("(")) text.substringAfter("(").substringBefore(")").trim() else ""
+            (if (fa) "بررسی کلیدهای کلودفلر" else "Verifying Cloudflare credentials") to proto
+        }
+        text.startsWith("Connecting to clean endpoint:") || text.startsWith("اتصال به IP تمیز:") -> {
+            val ep = text.substringAfter(":").trim()
+            (if (fa) "اتصال به آی‌پی تمیز" else "Connecting to clean endpoint") to ep
+        }
+        text.contains("Scanning Cloudflare gateways") || text.contains("اسکن خودکار درگاه‌های کلودفلر") -> {
+            val proto = if (text.contains("(")) text.substringAfter("(").substringBefore(")").trim() else ""
+            (if (fa) "اسکن خودکار درگاه‌های کلودفلر" else "Scanning Cloudflare gateways") to proto
+        }
+        text.contains("Candidate gateway selected") || text.contains("درگاه مناسب کلودفلر انتخاب شد") -> {
+            (if (fa) "انتخاب درگاه پایدار کلودفلر" else "Selected Cloudflare gateway") to ""
+        }
+        text.contains("Testing Cloudflare routes") || text.contains("آزمایش مسیرهای پرسرعت کلودفلر") -> {
+            (if (fa) "آزمایش مسیرهای پرسرعت کلودفلر" else "Testing Cloudflare routes") to ""
+        }
+        text.contains("Secure tunnel established") || text.contains("تانل امن برقرار شد") -> {
+            (if (fa) "برقراری تانل رمزگذاری‌شده" else "Secure tunnel established") to ""
+        }
+        text.contains("Routing device traffic") || text.contains("هدایت ترافیک دستگاه به تانل") -> {
+            s.routingDeviceTraffic to ""
+        }
+        text.contains("Connection established") || text.contains("متصل شد (تانل رمزگذاری‌شده فعال است)") -> {
+            s.connectionEstablished to ""
+        }
+        text.contains("Enrolling MASQUE") || text.contains("تولید گواهی امن MASQUE") -> {
+            (if (fa) "ثبت و صدور گواهی MASQUE" else "Enrolling MASQUE certificate") to ""
+        }
+        text.contains("Provisioning dedicated WireGuard") || text.contains("تولید هویت اختصاصی WireGuard") -> {
+            (if (fa) "تولید هویت امن WireGuard" else "Provisioning WireGuard identity") to ""
+        }
+        text.contains("Enabling WARP service") || text.contains("فعال‌سازی سرویس WARP") -> {
+            (if (fa) "فعال‌سازی سرویس WARP" else "Enabling WARP service") to ""
+        }
+        text.contains("WireGuard identity ready") || text.contains("کلید WireGuard آماده شد") -> {
+            (if (fa) "کلید WireGuard آماده شد" else "WireGuard identity ready") to "✓"
+        }
+        text.contains("MASQUE identity ready") || text.contains("کلید MASQUE آماده شد") -> {
+            (if (fa) "کلید MASQUE آماده شد" else "MASQUE identity ready") to "✓"
+        }
+        text.contains("WireGuard-over-MASQUE identity ready") || text.contains("کلید WireGuard-over-MASQUE آماده شد") -> {
+            (if (fa) "کلید WOM آماده شد" else "WOM identity ready") to "✓"
+        }
+        text.contains("Cloudflare WARP identities ready") ||
+        text.contains("Cloudflare WARP credentials verified") ||
+        text.contains("تمامی کلیدها با موفقیت دریافت") ||
+        text.contains("کلیدها با موفقیت تولید") -> {
+            (if (fa) "هویت‌های کلودفلر آماده شد" else "WARP credentials verified") to "✓"
+        }
         text.startsWith("Trying saved clean address") -> {
             s.tryingSavedAddress to text.substringAfterLast(" ").trimEnd('.')
         }
@@ -2615,8 +2720,11 @@ fun ConnectionStepsCard(
 
     if (!isVisible) return
 
-    val rows = remember(stepsStatus.steps, fa) {
-        foldSteps(stepsStatus.steps, s, fa)
+    val rows = remember(stepsStatus.steps, fa, vpnStatus) {
+        val folded = foldSteps(stepsStatus.steps, s, fa)
+        if (vpnStatus == VpnStatus.CONNECTED) {
+            folded.map { if (it.state == StepState.RUNNING) it.copy(state = StepState.DONE) else it }
+        } else folded
     }
 
     val scrollState = rememberScrollState()

@@ -305,17 +305,46 @@ fun ConfigManagerBottomSheet(
                         }
 
                         if (renewalMessage.isNotBlank()) {
+                            val localizedMsg = if (fa) {
+                                when {
+                                    renewalMessage.contains("Provisioning Cloudflare WARP credentials") || renewalMessage.contains("در حال تولید خودکار") ->
+                                        "در حال تولید خودکار کلیدهای کلودفلر…"
+                                    renewalMessage.contains("Renewing all Cloudflare credentials") || renewalMessage.contains("در حال استعلام") ->
+                                        "در حال استعلام و تولید مجدد کلیدهای کلودفلر…"
+                                    renewalMessage.contains("Enrolling MASQUE") -> "تولید گواهی امن MASQUE…"
+                                    renewalMessage.contains("Provisioning dedicated WireGuard") -> "تولید هویت اختصاصی WireGuard…"
+                                    renewalMessage.contains("Enabling WARP service") -> "فعال‌سازی سرویس WARP روی دستگاه…"
+                                    renewalMessage.contains("WireGuard identity ready") -> "کلید WireGuard آماده شد ✓"
+                                    renewalMessage.contains("MASQUE identity ready") -> "کلید MASQUE آماده شد ✓"
+                                    renewalMessage.contains("WireGuard-over-MASQUE identity ready") -> "کلید WireGuard-over-MASQUE آماده شد ✓"
+                                    renewalMessage.contains("Cloudflare WARP identities ready") -> "تمامی کلیدها با موفقیت دریافت و ذخیره شدند ✓"
+                                    renewalMessage.contains("Cloudflare WARP credentials verified") || renewalMessage.contains("تأیید شدند") ->
+                                        "تمامی کلیدها با موفقیت دریافت و تأیید شدند ✓"
+                                    renewalMessage.contains("Aether binary missing") -> "فایل اجرایی Aether یافت نشد"
+                                    renewalMessage.contains("Registration process timed out") -> "زمان استعلام کلید به پایان رسید"
+                                    renewalMessage.contains("Cloudflare API unreachable") -> "عدم دسترسی به سرور کلودفلر"
+                                    renewalMessage.contains("Key registration failed") -> "خطا در ثبت کلید"
+                                    else -> renewalMessage
+                                }
+                            } else renewalMessage
+
+                            val isErr = renewalMessage.contains("failed", ignoreCase = true) ||
+                                renewalMessage.contains("error", ignoreCase = true) ||
+                                renewalMessage.contains("Refused", ignoreCase = true) ||
+                                renewalMessage.contains("unreachable", ignoreCase = true) ||
+                                renewalMessage.contains("خطا")
+
                             Row(
                                 Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(if (renewalMessage.contains("خطا") || renewalMessage.contains("failed") || renewalMessage.contains("Refused")) RedC.copy(alpha = 0.15f) else BlueC.copy(alpha = 0.12f))
+                                    .background(if (isErr) RedC.copy(alpha = 0.15f) else BlueC.copy(alpha = 0.12f))
                                     .padding(horizontal = 8.dp, vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    renewalMessage,
-                                    color = if (renewalMessage.contains("خطا") || renewalMessage.contains("failed") || renewalMessage.contains("Refused")) Color(0xFFFF8A80) else BlueC,
+                                    localizedMsg,
+                                    color = if (isErr) Color(0xFFFF8A80) else BlueC,
                                     fontFamily = if (fa) Vazirmatn else ShareTechMono,
                                     fontSize = 9.5.sp,
                                 )
